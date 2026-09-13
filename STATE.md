@@ -9,12 +9,12 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-13
+Last updated: 2026-09-13 (Task 2 in progress)
 
 | # | Task | State |
 |---|------|-------|
 | 1 | Set up git repo | **done** |
-| 2 | Build the zarr-building codebase | not started |
+| 2 | Build the zarr-building codebase | **in progress** — append path validated, region path still to test |
 | 3 | Decide the chunking strategy (needs user approval) | not started |
 | 4 | Test the codebase for the spatial build | not started |
 | 5 | Run the spatial build | not started |
@@ -24,9 +24,31 @@ Last updated: 2026-09-13
 
 ## Next action
 
-Start Task 2 — build the zarr-building codebase.
+Finish Task 2: run the tiny **region** (temporal) build to completion, test
+resume on both paths, then hand Task 3 (chunking approval) to the user.
+
+The append path is done and proven: `config_zarr_tiny_spatial.yaml` builds a
+365 day store in ~2 minutes and its values are bit-exact against the raw files.
 
 ## Decisions made
+
+- **2026-09-13, undeclared fill sentinel (V3.16):** MSWEP V3.16 declares
+  `_FillValue = -9999`, which **never occurs in the data**. The real sentinel is
+  `-239976.0` = `-9999 x 24`, the fill summed over the 24 hourly steps a daily
+  total is built from, so upstream aggregated without propagating the mask. It
+  marks a solid 150 x 150 block at array indices `[0:150, 0:150]`
+  (75.05-89.95 N, 180-165 W, Arctic Ocean near the dateline) on **every day** of
+  the record. V2.8.0 has no negative values at all. Because the value in the
+  data does not match the attribute, xarray's CF masking leaves it in place, and
+  it would have been written to the store as though it were a measurement.
+  Handled by the `source_fill_values` config key: declared rather than detected
+  (a 'mask anything negative' rule would also hide a defect nobody has noticed),
+  checked to actually occur before masking, and recorded in the store's
+  `source_fill_values_masked` attribute. Consequence for the temporal store: the
+  7 x 7 = 49 tiles lying entirely inside that block are NaN across the whole
+  record, so it should hold 16151 chunks rather than 16200.
+  **Open to revisit:** V2.8.0 does have data over that block, so backfilling it
+  is possible at the cost of mixing two releases in one store.
 
 - **2026-09-13, time axis:** the stores are **reindexed onto the regular
   16,982-step daily axis** (1979-01-01..2025-06-29), with the two days V3.16 is

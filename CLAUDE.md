@@ -75,6 +75,44 @@ numbers if the download is ever refreshed.
 - Full record uncompressed: 16,980 x 1800 x 3600 x 4 B = **410 GiB**. Raw on
   disk is 81.67 GB, so the source compresses about 5.4x.
 
+### The declared fill value is not the one in the data (V3.16)
+
+`precipitation:_FillValue = -9999.f`, and that value **occurs nowhere in the
+record**. The sentinel actually written is **`-239976.0`**, which is
+`-9999 x 24` — the fill summed over the 24 hourly steps a daily total is
+aggregated from, so upstream did not propagate the mask through the
+aggregation. Because the value in the data does not match the attribute,
+xarray's CF masking leaves it untouched and it decodes as a precipitation
+measurement four orders of magnitude below zero.
+
+It covers a solid **150 x 150 block at array indices `[0:150, 0:150]`** — the
+grid's top-left corner, 75.05-89.95 N and 180-165 W, Arctic Ocean near the
+dateline — and is byte-identical on every day sampled across 1979-2025. It is
+the *only* negative value in the files. V2.8.0 has no negative values at all and
+does have data over that block, so this is a V3.16 production defect rather than
+a property of MSWEP.
+
+Handled by the `source_fill_values` config key, which lists values to mask to
+NaN on top of the declared `_FillValue`. Three rules hold it together:
+
+- **Declared, not detected.** A rule like "mask anything negative" would also
+  hide a defect nobody has noticed yet; a named value fails loudly when the next
+  release changes it. Same philosophy as `expected_missing_times`.
+- **`check_source_fill` runs first** and fails if a declared sentinel does not
+  occur, so a typo or a release that fixed the bug cannot leave the config
+  claiming a masking it never applied.
+- The build records what it actually masked in the store's
+  `source_fill_values_masked` attribute, rather than leaving the claim to the
+  hand-written `known_data_gaps` prose.
+
+Consequence for the **temporal** store: the 7 x 7 = 49 tiles lying entirely
+inside `[0:150, 0:150]` are NaN across the whole record, so zarr writes no chunk
+for them and the array should hold **16151 chunks rather than 16200**. The
+spatial store is unaffected — every plane still has data outside the corner.
+
+Whether any *other* cell carries the sentinel is a full-coverage question and
+belongs to the verifier, not the build, which only checks the first timestep.
+
 ### Known gap in V3.16
 
 `1993241.nc` (1993-08-29) and `1993243.nc` (1993-08-31) **do not exist** in the
