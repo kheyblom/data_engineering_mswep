@@ -1,0 +1,28 @@
+[project]
+name = "data_engineering_mswep"
+version = "0.1.0"
+# capped below 3.14, carried over from data_engineering_gleam: on 3.14 numpy's
+# temporary elision misfires and segfaults on `condition |= data == fill_value`
+# in xarray's CF masking, which every read of a full lat/lon slab goes through.
+# Same numpy, same xarray, no crash on 3.13. MSWEP reads the same code path --
+# the masking is xarray's, not the dataset's -- so the cap stands here too.
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "cartopy>=0.25.0",
+    "cftime>=1.6.5",
+    "dask>=2026.1.2",
+    "h5netcdf>=1.8.1",
+    "h5py>=3.16.0",
+    "icechunk>=2.1",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.11.0",
+    "netcdf4>=1.7.4",
+    "numpy>=2.4.2",
+    "pandas>=3.0.1",
+    # cartopy warps an image onto a projection with a KD-tree and has no
+    # bundled one; without scipy (or pykdtree) every imshow onto anything but
+    # PlateCarree raises, and pcolormesh at 1800x3600 takes ~60 s a panel.
+    "scipy>=1.18.1",
+    "xarray>=2026.2.0",
+    "zarr>=3.1.5",
+]
