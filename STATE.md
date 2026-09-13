@@ -24,20 +24,22 @@ Last updated: 2026-09-13
 
 ## Next action
 
-Start Task 2 — but settle the open question below first, because it decides the
-shape of the time axis every later task builds on.
+Start Task 2 — build the zarr-building codebase.
+
+## Decisions made
+
+- **2026-09-13, time axis:** the stores are **reindexed onto the regular
+  16,982-step daily axis** (1979-01-01..2025-06-29), with the two days V3.16 is
+  missing written as all-NaN, rather than carrying the irregular 16,980-step
+  axis the files give. Chosen so `time_coverage_resolution: P1D` is honest and
+  downstream date arithmetic cannot silently read the wrong day. See CLAUDE.md
+  for the consequences the build and the verifier have to honour — in
+  particular, the build must **fail** rather than reindex silently if the gap is
+  anything but those two known days.
 
 ## Open decisions needing the user
 
-1. **The two missing days in V3.16.** `1993241.nc` (1993-08-29) and
-   `1993243.nc` (1993-08-31) are absent from the GloH2O Drive, so the record is
-   16,980 files against the 16,982 days that 1979-01-01..2025-06-29 spans.
-   Either the store carries the irregular 16,980-step axis exactly as the files
-   give it, or it is reindexed onto the regular 16,982-step daily axis with
-   those two days written as all-NaN. This changes `time_coverage_resolution`,
-   downstream date indexing, and the temporal store's chunk length. Needs a
-   decision before Task 2 writes a time axis.
-2. **Chunking for both stores** — Task 3, explicitly flagged in TASKS.md as
+1. **Chunking for both stores** — Task 3, explicitly flagged in TASKS.md as
    needing approval. The GLEAM grid is identical (1800 x 3600 at 0.1 degree), so
    GLEAM's `(1, 1800, 3600)` spatial and `(record, 20, 20)` temporal shapes are
    the obvious starting proposal, but the block shape and the write cost differ

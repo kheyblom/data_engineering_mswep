@@ -83,13 +83,31 @@ this is upstream, not a download failure; V2.8.0 has a complete 365 days for
 1993. Every other year is complete (365/366, and 180 days for the partial 2025).
 
 A complete daily axis 1979-01-01..2025-06-29 would be 16,982 steps; there are
-16,980 files. **Whether the store carries the irregular 16,980-step axis or is
-reindexed onto the regular 16,982-step one with two all-NaN days is an open
-decision for Task 3 and needs the user's approval.** It is load-bearing for more
-than aesthetics: `time_coverage_resolution: P1D`, any date-arithmetic indexing
-downstream, and the temporal store's chunk length all depend on it. Whichever
-way it goes, the store must carry a `known_data_gaps` attribute recording it,
-the way the GLEAM stores record the 25 all-fill `E` days.
+16,980 files.
+
+**Decided 2026-09-13 by the user: reindex onto the regular 16,982-step daily
+axis, writing the two absent days as all-NaN.** The store's time axis is
+therefore strictly 1-day spaced and `time_coverage_resolution: P1D` is honest,
+so downstream date arithmetic cannot silently read the wrong day. Consequences
+to hold on to:
+
+- The reindex is a step in the build, applied to the lazy dataset after the
+  files are concatenated and before anything is written. The expected axis is
+  derived from the first and last dates on disk, not hardcoded.
+- **The build must fail rather than reindex silently** if the gap is anything
+  other than the two known 1993 days — a quiet reindex is exactly how an
+  incomplete download turns into a NaN-filled store. This is the MSWEP
+  equivalent of GLEAM's cross-variable `join='exact'` check, which does not
+  exist here because there is only one variable.
+- In the **spatial** store those two days are entirely fill, so zarr writes no
+  chunk for them: expect **16,980 chunks against 16,982 timesteps**, and that is
+  correct. This is precisely the GLEAM `E`-variable situation and the verifier
+  must trace such holes back to raw rather than treating them as failures.
+- In the **temporal** store they fall inside chunks that also hold valid days,
+  so they leave no hole at all — again as in GLEAM.
+- The store carries a `known_data_gaps` attribute recording both dates and
+  naming them as upstream, the way the GLEAM stores record the 25 all-fill `E`
+  days.
 
 ## What carries over from data_engineering_gleam
 
