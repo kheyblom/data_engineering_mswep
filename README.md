@@ -32,7 +32,7 @@ which `data_engineering_gleam` findings transfer here.
 ## Commands
 
 ```bash
-uv sync                                             # create/refresh .venv from uv.lock
+uv sync    # create/refresh .venv from uv.lock; Python is pinned >=3.13,<3.14
 
 # build a store; the config decides everything, including which write strategy
 uv run python mswep_zarr.py --config config/config_zarr_spatial.yaml
@@ -47,9 +47,3 @@ A run is restartable: relaunching with the same config resumes from the last
 commit rather than starting over. Only one writer at a time can hold the
 icechunk branch, so chained batch jobs must never overlap --
 `submit_mswep_zarr.sh` chains them with `-W depend=afterany:<jobid>`.
-
-## Setup
-
-```bash
-uv sync    # create/refresh .venv from uv.lock; Python is pinned >=3.13,<3.14
-```
