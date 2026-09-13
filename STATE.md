@@ -9,26 +9,29 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-13 (Task 2 in progress)
+Last updated: 2026-09-13 (Task 2 done; Task 3 awaiting approval)
 
 | # | Task | State |
 |---|------|-------|
 | 1 | Set up git repo | **done** |
-| 2 | Build the zarr-building codebase | **in progress** — append path validated, region path still to test |
+| 2 | Build the zarr-building codebase | **done** — both write strategies validated end to end |
 | 3 | Decide the chunking strategy (needs user approval) | not started |
-| 4 | Test the codebase for the spatial build | not started |
+| 4 | Test the codebase for the spatial build | Tier 0 + Tier 1 **passed**; Tier 2 (batch bench) not run |
 | 5 | Run the spatial build | not started |
 | 6 | Verify the spatial store | not started |
-| 7 | Test the codebase for the temporal build | not started |
+| 7 | Test the codebase for the temporal build | Tier 0 + Tier 1 **passed**; Tier 2 (batch bench) not run |
 | 8 | Verify the temporal store | not started |
 
 ## Next action
 
-Finish Task 2: run the tiny **region** (temporal) build to completion, test
-resume on both paths, then hand Task 3 (chunking approval) to the user.
+**Task 3 — the user must approve the chunking before any production build.**
+The proposal is in the section below. Nothing should be submitted to a batch
+queue until that is settled, since the chunking is baked into the store at
+creation and cannot be changed on a resume.
 
-The append path is done and proven: `config_zarr_tiny_spatial.yaml` builds a
-365 day store in ~2 minutes and its values are bit-exact against the raw files.
+After approval: Tier 2 bench (one batch job per strategy against the real record
+but a throwaway store) to measure throughput and peak memory, then size the
+production chain from it. See [TESTING.md](TESTING.md).
 
 ## Decisions made
 
@@ -61,11 +64,34 @@ The append path is done and proven: `config_zarr_tiny_spatial.yaml` builds a
 
 ## Open decisions needing the user
 
-1. **Chunking for both stores** — Task 3, explicitly flagged in TASKS.md as
-   needing approval. The GLEAM grid is identical (1800 x 3600 at 0.1 degree), so
-   GLEAM's `(1, 1800, 3600)` spatial and `(record, 20, 20)` temporal shapes are
-   the obvious starting proposal, but the block shape and the write cost differ
-   here (one file per day, 200x200 source chunks) and should be measured.
+1. **Chunking for both stores — Task 3, blocking.** Proposal:
+
+   | | spatial store | temporal store |
+   |---|---|---|
+   | chunk (time, lat, lon) | `(1, 1800, 3600)` | `(16982, 20, 20)` |
+   | chunk size | 24.7 MiB | 25.9 MiB |
+   | chunks in the array | 16,980 of 16,982 | 16,151 of 16,200 |
+   | cheap read | a global map = 1 chunk | a point series = 1 chunk |
+   | worst-case read | a point series = 16,982 chunks | a global map = 16,200 chunks |
+   | write strategy | `append`, 100 steps per commit | `region`, 9 blocks of `lat: 200, lon: -1` |
+   | estimated size | ~86 GiB | ~85 GiB |
+
+   Both shapes are carried straight from `data_engineering_gleam`, which is
+   defensible because the grid is **identical** (1800 x 3600 at 0.1 degree) and
+   both land in the 24-26 MiB range that is a good zarr chunk. The MSWEP-specific
+   part is the block shape: `lat: 200` because the v3.16 source chunks are
+   `[1, 200, 200]` and 1800/200 = 9 exactly, so a block covers whole source
+   chunks and covers each once.
+
+   The one number worth questioning is the temporal store's **9 blocks**. That is
+   the resume granularity, and with a single variable there is no second
+   dimension to subdivide along (GLEAM had 126 blocks across 14 variables). If a
+   45.5 GiB block does not fit one walltime, the fallback is `lat: 100` at the
+   cost of reading each source chunk twice.
+
+2. **Whether to backfill the 150 x 150 corner block from V2.8.0** (see the fill
+   sentinel decision above). Currently masked to NaN. V2.8.0 has real data there,
+   but using it mixes two releases in one store.
 
 ## Facts established so far
 

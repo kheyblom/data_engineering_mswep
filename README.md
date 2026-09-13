@@ -20,10 +20,33 @@ read-only verifier, and a separate script for the mutating finalization steps.
 
 ## Status
 
-The pipeline is not built yet. [STATE.md](STATE.md) is the current working
-state and the place to pick up from; [TASKS.md](TASKS.md) is the task list;
-[CLAUDE.md](CLAUDE.md) records the design rules and which
-`data_engineering_gleam` findings transfer here.
+The build pipeline is written and validated on a one-year fixture, both write
+strategies, including interrupt and resume. Nothing has been built at production
+scale, and the chunking still needs sign-off.
+
+[STATE.md](STATE.md) is the current working state and the place to pick up from;
+[TASKS.md](TASKS.md) is the task list; [TESTING.md](TESTING.md) records what was
+validated and what it cost; [CLAUDE.md](CLAUDE.md) records the design rules and
+which `data_engineering_gleam` findings transfer here.
+
+## Commands
+
+```bash
+uv sync                                             # create/refresh .venv from uv.lock
+
+# build a store; the config decides everything, including which write strategy
+uv run python mswep_zarr.py --config config/config_zarr_spatial.yaml
+uv run python mswep_zarr.py --config config/config_zarr_temporal.yaml
+
+# the one-year correctness fixture (see TESTING.md for how to stage it)
+uv run python mswep_zarr.py --config config/config_zarr_tiny_spatial.yaml
+uv run python mswep_zarr.py --config config/config_zarr_tiny_temporal.yaml
+```
+
+A run is restartable: relaunching with the same config resumes from the last
+commit rather than starting over. Only one writer at a time can hold the
+icechunk branch, so chained batch jobs must never overlap --
+`submit_mswep_zarr.sh` chains them with `-W depend=afterany:<jobid>`.
 
 ## Setup
 
