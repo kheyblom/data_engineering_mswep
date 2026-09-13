@@ -1,0 +1,72 @@
+# Tier 1 correctness config for the append write strategy: a staged tree of
+# symlinks holding one year, so a full build, a resume and a rerun all finish in
+# minutes. Every path key differs from the production config, so this can never
+# touch a real store.
+#
+# The tree deliberately omits 1979182.nc (1979-07-01), which is NOT a real MSWEP
+# gap: it is there so the fixture exercises the gap splice and the coverage
+# guard, which the production configs only exercise on two days out of 16,982.
+# The tree is symlinks into the real raw data and is rebuilt on demand, so it is
+# staged from a throwaway script rather than one kept in the repo:
+#
+#   SRC=/glade/derecho/scratch/$USER/data/mswep/v_3_16/raw/past/daily
+#   DST=/glade/derecho/scratch/$USER/data/mswep_tiny/v_3_16/raw/past/daily
+#   mkdir -p "$DST/1979"
+#   for f in "$SRC"/1979/*.nc; do b=$(basename "$f")
+#     [ "$b" = "1979182.nc" ] && continue
+#     ln -sf "$f" "$DST/1979/$b"
+#   done
+directories:
+  download: /glade/derecho/scratch/kheyblom/data/mswep_tiny/
+  logs: ./logs
+output_conventions:
+  filename: mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+  # not 'spatial': the staged tree already isolates this store by directory, but
+  # a distinct name means a mistyped path cannot quietly resolve to a real store
+  suffix: tiny_spatial
+log_file: mswep_zarr_tiny_spatial.log
+version: V3.16
+product: Past/Daily
+variables: all
+grid_name: native_0p1x0p1
+expected_missing_times:
+  - 1979-07-01
+# Values the source files use as fill but do NOT declare in _FillValue, so the
+# CF decoding leaves them in the data as though they were measurements.
+#
+# MSWEP V3.16 marks a solid 150 x 150 block at the corner of the grid --
+# array indices [0:150, 0:150], i.e. 75.05-89.95 N and 180-165 W, Arctic Ocean
+# near the dateline -- with -239976.0 on every single day of the record. That is
+# the declared _FillValue of -9999 summed over the 24 hourly steps the daily
+# total is built from, so upstream aggregated without propagating the mask.
+# V2.8.0 has no negative values at all, so this is a V3.16 production defect.
+#
+# Declared rather than detected: a rule like 'mask anything negative' would also
+# hide a defect nobody has noticed, while a named value fails loudly if the next
+# release changes it. The build checks each value actually occurs before masking.
+source_fill_values:
+  - -239976.0
+
+# 365 steps give 3 full batches and a 65 step final one, so the short final
+# batch is exercised rather than assumed
+chunks:
+  time: 1
+  lat: -1
+  lon: -1
+timesteps_per_commit: 100
+num_workers: 4
+file_cache_maxsize: 32
+chunk_cache_size_mib: 32
+
+# a minimal attrs section, so a tiny run exercises the same attribute path the
+# production build and finalize_mswep_zarr.py use rather than skipping it
+attrs:
+  title: 'TEST STORE -- MSWEP {version_label} {temporal_resolution}, staged subset, not for use'
+  Conventions: ACDD-1.3
+  comment: >-
+    Built from config_zarr_tiny_spatial.yaml against a staged tree of one year
+    with one day removed. A correctness fixture, not data.
+variable_attrs:
+  precipitation:
+    long_name: Precipitation
+    standard_name: precipitation_flux

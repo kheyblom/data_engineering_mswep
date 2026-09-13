@@ -1,0 +1,66 @@
+# Tier 1 correctness config for the region write strategy, against the same
+# staged tree config_zarr_tiny_spatial.yaml uses -- see that file for how the
+# tree is staged and why it omits 1979182.nc. One year rather than the full
+# record so a block is ~1 GiB rather than ~45 GiB and the whole build finishes
+# in minutes; the block count is what matters here, since it is what resume is
+# exercised against.
+directories:
+  download: /glade/derecho/scratch/kheyblom/data/mswep_tiny/
+  logs: ./logs
+output_conventions:
+  filename: mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+  # not 'temporal': the staged tree already isolates this store by directory,
+  # but a distinct name means a mistyped path cannot quietly resolve to a real
+  # store
+  suffix: tiny_temporal
+log_file: mswep_zarr_tiny_temporal.log
+version: V3.16
+product: Past/Daily
+variables: all
+grid_name: native_0p1x0p1
+expected_missing_times:
+  - 1979-07-01
+# Values the source files use as fill but do NOT declare in _FillValue, so the
+# CF decoding leaves them in the data as though they were measurements.
+#
+# MSWEP V3.16 marks a solid 150 x 150 block at the corner of the grid --
+# array indices [0:150, 0:150], i.e. 75.05-89.95 N and 180-165 W, Arctic Ocean
+# near the dateline -- with -239976.0 on every single day of the record. That is
+# the declared _FillValue of -9999 summed over the 24 hourly steps the daily
+# total is built from, so upstream aggregated without propagating the mask.
+# V2.8.0 has no negative values at all, so this is a V3.16 production defect.
+#
+# Declared rather than detected: a rule like 'mask anything negative' would also
+# hide a defect nobody has noticed, while a named value fails loudly if the next
+# release changes it. The build checks each value actually occurs before masking.
+source_fill_values:
+  - -239976.0
+
+chunks:
+  time: -1
+  lat: 20
+  lon: 20
+write_strategy: region
+# lat: 200 matches the production block and the [1, 200, 200] source chunking;
+# lon is spanned whole, as it must be. 9 blocks over the staged year, so there
+# is something to resume from partway through.
+block_shape:
+  lat: 200
+  lon: -1
+timesteps_per_read: 365
+num_workers: 1
+file_cache_maxsize: 64
+chunk_cache_size_mib: 16
+
+# a minimal attrs section, so a tiny run exercises the same attribute path the
+# production build and finalize_mswep_zarr.py use rather than skipping it
+attrs:
+  title: 'TEST STORE -- MSWEP {version_label} {temporal_resolution}, staged subset, not for use'
+  Conventions: ACDD-1.3
+  comment: >-
+    Built from config_zarr_tiny_temporal.yaml against a staged tree of one year
+    with one day removed. A correctness fixture, not data.
+variable_attrs:
+  precipitation:
+    long_name: Precipitation
+    standard_name: precipitation_flux

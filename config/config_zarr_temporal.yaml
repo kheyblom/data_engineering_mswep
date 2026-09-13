@@ -1,0 +1,160 @@
+directories:
+  download: /glade/derecho/scratch/kheyblom/data/mswep/
+  logs: ./logs
+output_conventions:
+  filename: mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+  # sibling of the 'spatial' store built from the same files: same data, same
+  # grid, chunked for the opposite access pattern
+  suffix: temporal
+# not shared with the spatial build, so one store's forensics stay readable
+log_file: mswep_zarr_temporal.log
+version: V3.16
+product: Past/Daily
+variables: all
+grid_name: native_0p1x0p1
+
+# see config_zarr_spatial.yaml; the two stores must declare the same gaps or
+# they are not the same record
+expected_missing_times:
+  - 1993-08-29
+  - 1993-08-31
+
+# Values the source files use as fill but do NOT declare in _FillValue, so the
+# CF decoding leaves them in the data as though they were measurements.
+#
+# MSWEP V3.16 marks a solid 150 x 150 block at the corner of the grid --
+# array indices [0:150, 0:150], i.e. 75.05-89.95 N and 180-165 W, Arctic Ocean
+# near the dateline -- with -239976.0 on every single day of the record. That is
+# the declared _FillValue of -9999 summed over the 24 hourly steps the daily
+# total is built from, so upstream aggregated without propagating the mask.
+# V2.8.0 has no negative values at all, so this is a V3.16 production defect.
+#
+# Declared rather than detected: a rule like 'mask anything negative' would also
+# hide a defect nobody has noticed, while a named value fails loudly if the next
+# release changes it. The build checks each value actually occurs before masking.
+source_fill_values:
+  - -239976.0
+
+# one chunk holds a 2 x 2 degree tile through the whole record, 25.9 MiB of
+# float32. A point time series is one chunk; a global map is 16200 of them
+chunks:
+  time: -1
+  lat: 20
+  lon: 20
+# a store chunked across the whole time axis has no append boundary to stop at,
+# so it is written as a skeleton and filled in place, one block per commit
+write_strategy: region
+# the read and commit unit. Two things decide it, and locality matters more
+# than volume.
+#
+# lat: 200 because the MSWEP v3.16 files are chunked [1, 200, 200] and
+# 1800 / 200 = 9 exactly, so a block starting on a multiple of 200 covers whole
+# source chunks and covers each of them once. A block that is not a multiple of
+# 200 straddles source chunks and re-decompresses them for the neighbouring
+# block as well. It is also a whole number of the 20 cell output chunks, which
+# a region write requires.
+#
+# lon: -1 because a block narrower than the globe reads a strided subset of the
+# source chunks -- scattered through the file -- instead of contiguous runs of
+# 18. In GLEAM that measured pathologically slow at the same volume. Full lon
+# costs only more resident memory, which Derecho does not bill.
+#
+# At lat: 200 a block is 45.5 GiB resident and there are 9 of them, which is a
+# coarse resume granularity: with one variable there is no second dimension of
+# blocks to subdivide along, unlike GLEAM's 126. If a block does not fit one
+# walltime, halve to lat: 100 and accept reading each source chunk twice.
+block_shape:
+  lat: 200
+  lon: -1
+# timesteps pulled out of the lazy dataset per read. One MSWEP file is one
+# timestep, so the dask chunks along time are one step each and reading a block
+# chunk by chunk would be ~17,000 scheduler round trips for 2.9 MB apiece.
+# A year at a time is ~1.05 GiB of transient buffer on top of the block.
+timesteps_per_read: 365
+# GLEAM measured its region path at 0.47 cores while billing 2, because the
+# reads serialise behind one process-global HDF5 lock. The same is expected
+# here, but the batched slab read gives dask far more to do per round trip than
+# GLEAM's had, so this is a starting value to be measured rather than a
+# conclusion. Must not exceed the cpus the batch job was granted.
+num_workers: 1
+# a block reads every file of the record once, so nothing is re-read within a
+# block and the cache only has to avoid thrashing rather than hold a working
+# set. Worst case memory is file_cache_maxsize x chunk_cache_size_mib.
+file_cache_maxsize: 64
+# one source chunk is 200 x 200 x 4 B = 160 KiB and a read touches a row of 18
+# of them, so 16 MiB per file is already generous
+chunk_cache_size_mib: 16
+
+# Store global attributes. See config_zarr_spatial.yaml for why 'history',
+# 'date_created' and 'verification' are absent here and written by
+# finalize_mswep_zarr.py once they have been earned.
+attrs:
+  title: >-
+    MSWEP {version_label} daily precipitation, native 0.1 degree global grid,
+    1979-2025, chunked for time series
+  summary: >-
+    The Multi-Source Weighted-Ensemble Precipitation (MSWEP)
+    {version_label} daily product on its native 0.1 degree global grid, stored
+    as an icechunk-backed zarr store. A single variable, precipitation, merged
+    from one netCDF file per day onto one time/lat/lon grid.
+  # ACDD rather than CF, deliberately: see cf_compliance
+  Conventions: ACDD-1.3
+  cf_compliance: >-
+    Not CF compliant. The variable's units are carried through unaltered from
+    the upstream MSWEP netCDF files, spelled 'mm/d', which udunits does not
+    parse; the upstream files carry no standard_name and no long_name at all.
+    Correcting the units would mean diverging from upstream, so they are left
+    as published and the descriptive names are supplied through variable_attrs
+    instead.
+  source: >-
+    MSWEP {version_label} {period} {temporal_resolution} netCDF files, one file
+    per day, downloaded from the GloH2O Google Drive distribution by
+    access_mswep
+  creator_name: Kyle Heyblom
+  creator_email: heyblom@umich.edu
+  references: >-
+    http://www.gloh2o.org/mswep/ -- Beck et al. (2019), MSWEP V2 global
+    3-hourly 0.1 degree precipitation, Bulletin of the American Meteorological
+    Society 100(3), doi:10.1175/BAMS-D-17-0138.1
+  chunking: >-
+    Chunked (time, lat, lon) = (16982, 20, 20), float32, zstd: one 2 x 2 degree
+    tile through the whole record per chunk, 25.9 MiB. Built for reading time
+    series -- a series at any point is a single chunk. A global map is the worst
+    case for this layout, touching all 16200 chunks of the variable; for maps
+    and fields read the sibling
+    mswep.{version}.{period}.{temporal_resolution}.{grid_name}.spatial.zarr
+    instead, which holds the same data chunked (1, 1800, 3600).
+  related_store: >-
+    mswep.{version}.{period}.{temporal_resolution}.{grid_name}.spatial.zarr --
+    the same variable on the same grid over the same period, chunked one whole
+    global map per chunk. Identical values; the two differ only in chunking, and
+    each is built from and verified against the raw files independently rather
+    than derived from the other.
+  known_data_gaps: >-
+    MSWEP {version_label} does not publish 1993-08-29 or 1993-08-31. The store
+    covers the complete daily axis and both days are present and entirely fill
+    (NaN), so the time axis is regularly spaced and a date offset always lands
+    on the date it names. This is a gap in the upstream release, not a
+    conversion defect. Under this chunking those two days fall inside chunks
+    that also hold valid days, so unlike in the sibling spatial store they
+    leave no missing chunks.
+    Separately, MSWEP {version_label} never produced a 150 x 150 block at the
+    corner of the grid -- 75.05-89.95 N, 180-165 W -- and marked it -239976.0
+    (the declared _FillValue of -9999 summed over 24 hourly steps) rather than
+    with the declared fill value, on every day of the record. Those cells are
+    masked to NaN here; see the source_fill_values_masked attribute. V2.8.0 does
+    have data over that block. Under this chunking that block IS what makes
+    chunks absent: the 7 x 7 = 49 tiles lying entirely inside it are NaN across
+    the whole record, so the array holds 16151 chunks rather than 16200 and that
+    is correct.
+
+# see config_zarr_spatial.yaml; the two stores must describe the variable
+# identically or the metadata comparison between them fails
+variable_attrs:
+  precipitation:
+    long_name: Precipitation
+    standard_name: precipitation_flux
+    comment: >-
+      Daily total precipitation. Values are quantised upstream -- see the
+      least_significant_digit attribute carried over from the source files --
+      so not all of the float32 precision is meaningful.
