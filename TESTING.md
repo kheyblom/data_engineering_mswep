@@ -425,3 +425,61 @@ a full 9-block build. The resumes ran their remaining blocks at 12-25 min each
 and finished in 1.73 h and 2.18 h. Block cost varies with how much of the band
 is ocean, so the mid-latitude bands the bench happened to measure are the
 expensive ones. Size a chain from the *slowest* blocks, not the mean.
+
+## Verification of all eight stores (2026-09-14)
+
+`verify_mswep_zarr.py`, default phases, every store against the raw netCDF files
+with masking switched off on the raw side.
+
+| store | checks | failures | cells bit-checked | absent chunks |
+|---|---|---|---|---|
+| `v_3_16.past.spatial` | 49 | **0** | 154,980,000 | 2 (the 1993 gap days) |
+| `v_3_16.past.temporal` | 52 | **0** | 3,679,200 | 49 (the corner tiles) |
+| `v_3_16.nrt.spatial` | 47 | **0** | 149,040,000 | 0 |
+| `v_3_16.nrt.temporal` | 51 | **0** | 3,840,000 | 0 |
+| `v_2_8.past.spatial` | 48 | **0** | 155,520,000 | 0 |
+| `v_2_8.past.temporal` | 51 | **0** | 3,840,000 | 0 |
+| `v_2_8.nrt.spatial` | 47 | **0** | 155,520,000 | 0 |
+| `v_2_8.nrt.temporal` | 51 | **0** | 3,840,000 | 0 |
+
+**396 checks, 0 failures, ~630 million cells compared bit-exactly.**
+
+Every absent chunk was traced rather than assumed: the two in
+`v_3_16.past.spatial` are the days MSWEP never published, confirmed by the raw
+tree holding no file for them, and the 49 in `v_3_16.past.temporal` are exactly
+the tiles lying inside the corner block, confirmed as holding no data on any
+sampled raw day. The other six stores have no absent chunk at all.
+
+The spatial stores check far more cells than the temporal ones because a
+spatial box is a whole global plane while a temporal box is a 20 x 20 tile. The
+temporal stores earn their coverage differently: their `sweep` phase audits all
+16,200 chunk positions off the manifest, and their smallest written chunks are
+read back and compared against raw, which is the check a size floor cannot make
+on that layout.
+
+### 12. The same read-amplification bug, twice
+
+`check_sentinel` and then `check_index` both read a whole lat/lon plane out of
+the store. On the spatial layout a plane is one chunk. On the temporal layout it
+is **every** chunk of the variable -- 86 GiB for one map of `v_3_16.past` -- so
+the first cost a 1.8 GiB read per plane on the fixture and the second left a
+production job sitting in the index phase for 32 minutes before it was killed.
+
+Both now read in the layout's own unit: a plane on the spatial layout, and a
+whole-record tile (sentinel) or a 6 x 6 lattice of tiles (index) on the
+temporal one. Each is a single chunk. The index check reports which scope it
+used, so a sampled answer is never mistaken for an exhaustive one.
+
+The rule this cost two mistakes to learn, and the one to apply to any new
+phase: **on the temporal layout, never read across lat/lon.** The store's
+chunking decides what is cheap, and a global map is that layout's worst case --
+which is the whole reason the spatial store exists. Every store read in the
+verifier was audited against this after the second occurrence.
+
+### 13. `qhist`'s Mem column is the request, not the usage
+
+`v_2_8.past.temporal` verified in 9 minutes against an expected ~50, with
+`Mem` exactly equal to its 16 GB request -- which reads as a memory kill. It was
+not: the job completed with 51 checks and 0 failures, and the speed was the raw
+files being warm in page cache from the build. Read the job's own log before
+concluding anything from `qhist`.

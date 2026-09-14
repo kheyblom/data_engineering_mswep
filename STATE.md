@@ -9,58 +9,50 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-14 (all 8 stores built; verifier still to be written)
+Last updated: 2026-09-14 (all 8 stores built and verified; finalization is what
+remains)
 
-| # | Task | State |
-|---|------|-------|
-| 1 | Set up git repo | **done** |
-| 2 | Build the zarr-building codebase | **done** |
-| 3 | Decide the chunking strategy | **done** |
-| 4 | Test the codebase (spatial) | **done** - Tier 0, 1 and 2 all passed |
-| 5 | Run the builds | **done** - all 8 stores |
-| 6 | Verify the spatial stores | **blocked** - `verify_mswep_zarr.py` does not exist |
-| 7 | Test the codebase (temporal) | **done** - Tier 0, 1 and 2 all passed |
-| 8 | Verify the temporal stores | **blocked** - `verify_mswep_zarr.py` does not exist |
+**All eight tasks in TASKS.md are complete.** 396 checks across the eight
+stores, **0 failures**, ~630 million cells compared bit-exactly against the raw
+netCDF files.
 
-All eight stores built, 315 GB total, each with the expected axis, regular daily
-spacing, intended chunking and bit-exact values on sampled days:
+| store | days | size | checks | absent chunks |
+|---|---|---|---|---|
+| `v_3_16.past.spatial` | 16,982 | 87 G | 49 / 0 fail | 2 (1993 gap days) |
+| `v_3_16.past.temporal` | 16,982 | 86 G | 52 / 0 fail | 49 (corner tiles) |
+| `v_3_16.nrt.spatial` | 684 | 3.5 G | 47 / 0 fail | 0 |
+| `v_3_16.nrt.temporal` | 684 | 3.5 G | 51 / 0 fail | 0 |
+| `v_2_8.past.spatial` | 15,339 | 53 G | 48 / 0 fail | 0 |
+| `v_2_8.past.temporal` | 15,339 | 57 G | 51 / 0 fail | 0 |
+| `v_2_8.nrt.spatial` | 2,117 | 13 G | 47 / 0 fail | 0 |
+| `v_2_8.nrt.temporal` | 2,117 | 14 G | 51 / 0 fail | 0 |
 
-| store | days | size | chunk objects |
-|---|---|---|---|
-| `v_3_16.past.spatial` | 16,982 | 87 G | 17,320 |
-| `v_3_16.past.temporal` | 16,982 | 86 G | 16,154 |
-| `v_3_16.nrt.spatial` | 684 | 3.5 G | 698 |
-| `v_3_16.nrt.temporal` | 684 | 3.5 G | 16,203 |
-| `v_2_8.past.spatial` | 15,339 | 53 G | 15,647 |
-| `v_2_8.past.temporal` | 15,339 | 57 G | 16,807 |
-| `v_2_8.nrt.spatial` | 2,117 | 13 G | 2,161 |
-| `v_2_8.nrt.temporal` | 2,117 | 14 G | 16,203 |
-
-`v_3_16.past.temporal` landing on 16,154 is the exact prediction (16,200 tiles
-minus the 49 inside the all-NaN corner, plus 3 coordinates).
+Every absent chunk was traced to raw rather than assumed.
 
 ## Next action
 
-**Write `verify_mswep_zarr.py`.** Tasks 6 and 8 are blocked on it and no store
-may carry a `verification` attribute until it has run. Model it on
-`data_engineering_gleam/verify_gleam_zarr.py`: read-only, phase-selectable,
-non-zero exit on any failure. What it has to cover here:
+**Write `finalize_mswep_zarr.py`** -- the only script that mutates a finished
+store, and the last piece of the pipeline. Model it on
+`data_engineering_gleam/finalize_gleam_zarr.py`: writes nothing without
+`--apply`, one action per invocation, and `--status` first because it reports
+which steps a store still needs.
 
-- `sweep` - every chunk off the manifest, no data read. The only full-coverage
-  check available, and the thing to run first.
-- the **reachable** chunk count against prediction, since three stores hold
-  unreachable objects from killed bench blocks and per-commit forks and a raw
-  file count cannot tell those apart (see TESTING.md finding 10).
-- whether any cell **other** than the 150 x 150 corner carries -239976.0 in
-  V3.16 Past. The build only checks the first timestep, deliberately.
-- physical range. `v_2_8.nrt` showed 771.9 mm/day on 2026-09-13, well above the
-  234-296 of other sampled days - plausible for extreme rainfall but worth an
-  explicit check rather than a shrug.
-- cross-store metadata comparison, which is the safeguard against drift across
-  eight hand-written configs.
+The write order is load-bearing and must not be improvised:
 
-Then `finalize_mswep_zarr.py`: `--attrs`, then `--tag`, then `--gc`, in that
-order, dry-run before `--gc --apply`, re-verify after.
+1. `--attrs` -- publish the provenance attributes, including `history`,
+   `date_created`, and the `verification` attribute each store has now earned.
+   No store carries one yet, correctly.
+2. `--tag` -- `<version>-verified-<YYYYMMDD>`. Tags are immutable, so one
+   created before the attributes exist permanently names a store that does not
+   describe itself.
+3. `--gc` -- irreversible. Dry-run first, re-run
+   `verify_mswep_zarr.py --phases structure,sweep` afterwards.
+
+What garbage collection will actually reclaim, measured by the verifier's dry
+runs: **3.57 GiB of genuinely orphaned chunks in `v_2_8.past.temporal`** only,
+left by a Tier 2 bench block killed after writing but before committing. Every
+other store has zero unreachable chunks; their unreachable *snapshots* are the
+fork-per-commit behaviour and reclaim essentially nothing.
 
 ## Decisions made
 

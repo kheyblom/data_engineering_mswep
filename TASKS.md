@@ -11,9 +11,9 @@ This project will conduct the following tasks:
     > I need to approve final decisions for this
 4. [DONE 2026-09-14 - Tier 0, Tier 1 and Tier 2 all passed] test the codebase for the spatial zarr build. use a similar testing procedure as in @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
 5. [DONE 2026-09-14 - all 8 stores built, spatial and temporal] after testing is complete and codebase is verified, run the spatial zarr build.
-6. verify the spatial zarr store. run a similar verification to @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
+6. [DONE 2026-09-14 - all 4 spatial stores verified, 0 failures] verify the spatial zarr store. run a similar verification to @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
 7. [DONE 2026-09-14 - Tier 0, Tier 1 and Tier 2 all passed] test the codebase again for the temporal zarr build.
-8. verify the temporal zarr store
+8. [DONE 2026-09-14 - all 4 temporal stores verified, 0 failures] verify the temporal zarr store
 
 SCOPE CHANGE, approved 2026-09-13. Tasks 4-8 were written for ONE spatial and
 ONE temporal store. MSWEP publishes each release as two products -- Past
