@@ -31,23 +31,28 @@ Every absent chunk was traced to raw rather than assumed.
 
 ## Next action
 
-**One decision outstanding: whether to run `--gc --apply`.** Everything else is
-done -- all eight stores are built, verified, attributed and tagged.
+**Nothing outstanding. The project is complete.** All eight tasks in TASKS.md
+are done: eight stores built, verified, attributed, tagged, and collected where
+collection was worth doing.
 
-Garbage collection would reclaim **3.57 GiB, all of it in
-`v_2_8.past.temporal`** (600 chunks orphaned by a Tier 2 bench block killed
-after writing but before committing). Every other store would reclaim 0.00 GiB;
-their unreachable snapshots and manifests are the fork-per-commit behaviour and
-free no space.
+If the record is refreshed later, the cycle is:
 
-It is irreversible, and **no second copy of these stores exists** -- scratch is
-not backed up. 3.57 GiB is about 1% of the 315 GB collection, against a rebuild
-cost of ~14 core-hours if anything went wrong. The dry run has been recorded in
-TESTING.md finding 16; the decision is the user's.
+```bash
+# 1. rebuild or extend (resumes from the last commit if interrupted)
+CONFIG=config/config_zarr_<release>_<product>_<layout>.yaml ./submit_mswep_zarr.sh
+# 2. verify -- finalization refuses to write without a passing, complete run
+VERIFY=1 CONFIG=<same> ./submit_mswep_zarr.sh
+# 3. finalize, in this order, --status first
+uv run python finalize_mswep_zarr.py --config <same> --status
+uv run python finalize_mswep_zarr.py --config <same> --attrs --apply
+uv run python finalize_mswep_zarr.py --config <same> --tag <name> --apply
+uv run python finalize_mswep_zarr.py --config <same> --gc --apply   # only if it frees bytes
+```
 
-If it is run: `--gc --apply` per store, then re-run
-`verify_mswep_zarr.py --phases structure,sweep` against each, which is the gate
-that proves collection did no harm.
+Note `--status` on the four spatial stores still offers `--gc`. That is
+correct -- they hold unreachable snapshots from the fork-per-commit behaviour --
+but collecting them frees **0.00 GiB**, and it was deliberately not run. Do not
+read it as work left undone.
 
 ## Decisions made
 

@@ -552,3 +552,44 @@ Against that: collection is irreversible, and **there is no second copy of any
 of these stores.** Scratch is not backed up and the campaign allocation holds
 nothing. Rebuilding would cost roughly 14 core-hours and several hours of
 wall-clock.
+
+### 17. Garbage collection, run on one store only (2026-09-14)
+
+Decided by the user: collect `v_2_8.past.temporal`, which had 3.57 GiB of real
+orphans, and leave the other seven alone, which had none.
+
+```
+before: 53.01 GiB reachable across 14 snapshots
+deleted 3.57 GiB: 600 chunks, 0 manifests, 0 snapshots, 0 attributes, 0 txn logs
+after:  53.01 GiB reachable across 14 snapshots
+reachable bytes and history unchanged, as garbage collection requires
+```
+
+On disk 57 G -> 54 G, chunk objects 16,807 -> 16,207, which is exactly the 600
+the dry run named. The gate afterwards --
+`verify_mswep_zarr.py --phases structure,sweep` -- passed 19 checks with 0
+failures: all 16,200 chunks still present, and the smallest written chunks still
+bit-exact against raw.
+
+The four spatial stores still report `--gc` as available. That is honest -- they
+hold unreachable snapshots and manifests from the fork-per-commit behaviour --
+but collecting them would free **0.00 GiB**, so it was deliberately not done.
+Nothing is outstanding there.
+
+### 18. Provenance must not chase HEAD
+
+`--status` reported `--attrs` outstanding on all eight stores immediately after
+they had been written. The only difference was the git revision embedded in
+`history`: the stores recorded `d72f04c`, the revision that finalized them,
+while a fresh run generated whatever HEAD had become after some unrelated
+documentation commits.
+
+Left alone that would have been corrosive rather than merely noisy: `--status`
+would permanently claim work outstanding, and any `--attrs --apply` would churn
+the attribute on every commit to this repository, each one a new snapshot in
+the store.
+
+`build_history` now returns an existing history untouched, recognising its own
+by the `by mswep_zarr.py` marker. The revision worth recording is the one that
+produced the store, not the one checked out when somebody later asks after it.
+A rebuilt store has no history to preserve and gets a fresh one.

@@ -92,6 +92,9 @@ VERIFY_PASSED = 'store verified'
 # count and date_created move every time --attrs was re-run, which is exactly
 # what an idempotency check caught.
 ATTRS_MESSAGE = 'add provenance and discovery attributes'
+# how build_history recognises a history string it wrote itself, as opposed to
+# the one the upstream netCDF files carry
+OUR_HISTORY_MARKER = 'by mswep_zarr.py'
 # icechunk's own first snapshot, which is not a commit anyone made
 INITIAL_MESSAGE = 'Repository initialized'
 
@@ -255,6 +258,18 @@ def build_history(repository, settings, evidence, current):
     first, last = built[-1], built[0]
     started = first.written_at.astimezone(datetime.timezone.utc)
     finished = last.written_at.astimezone(datetime.timezone.utc)
+
+    # Once written, the history is left exactly as it stands. The revision it
+    # names is the one that produced and finalized the store, which is the
+    # provenance worth keeping; regenerating it would replace that with
+    # whatever HEAD happens to be today, churn the attribute on every unrelated
+    # commit to this repository, and leave --status permanently reporting
+    # --attrs outstanding. A rebuilt store has no history to preserve, so it
+    # gets a fresh one.
+    existing = current.get('history', '')
+    if OUR_HISTORY_MARKER in existing:
+        # no upstream history to move aside: it was moved on the first write
+        return existing, finished.strftime('%Y-%m-%dT%H:%M:%SZ'), None
 
     strategy = settings.get('write_strategy', 'append')
     unit = 'block commits' if strategy == 'region' else 'append commits'
