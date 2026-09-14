@@ -9,8 +9,8 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-14 (all 8 stores built and verified; finalization is what
-remains)
+Last updated: 2026-09-14 (all 8 stores built, verified, finalized and tagged;
+nothing outstanding)
 
 **All eight tasks in TASKS.md are complete.** 396 checks across the eight
 stores, **0 failures**, ~630 million cells compared bit-exactly against the raw
@@ -23,7 +23,7 @@ netCDF files.
 | `v_3_16.nrt.spatial` | 684 | 3.5 G | 47 / 0 fail | 0 |
 | `v_3_16.nrt.temporal` | 684 | 3.5 G | 51 / 0 fail | 0 |
 | `v_2_8.past.spatial` | 15,339 | 53 G | 48 / 0 fail | 0 |
-| `v_2_8.past.temporal` | 15,339 | 57 G | 51 / 0 fail | 0 |
+| `v_2_8.past.temporal` | 15,339 | 54 G | 51 / 0 fail | 0 |
 | `v_2_8.nrt.spatial` | 2,117 | 13 G | 47 / 0 fail | 0 |
 | `v_2_8.nrt.temporal` | 2,117 | 14 G | 51 / 0 fail | 0 |
 

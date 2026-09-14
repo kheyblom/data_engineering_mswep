@@ -43,15 +43,20 @@ and the NRT stores say plainly that they are not gauge-corrected.
 
 ## Status
 
-**All eight stores are built** (2026-09-14, 315 GB total). Every one has the
-expected axis length, a strictly regular daily spacing, the intended chunking,
-and values bit-exact against the raw netCDF on sampled days.
+**All eight stores are built, verified and finalized** (2026-09-14, 312 GB
+total). Every one has the expected axis length, a strictly regular daily
+spacing, the intended chunking, and values bit-exact against the raw netCDF.
 
-They are **not yet formally verified**: `verify_mswep_zarr.py` does not exist,
-so no store carries a `verification` attribute, and none has been finalized
-(`finalize_mswep_zarr.py` -- attrs, tag, gc -- is also still to be written).
-Three stores carry unreachable objects left by walltime-killed bench blocks and
-by icechunk's per-commit forks; `--gc` is what reclaims them. See
+`verify_mswep_zarr.py` ran against all eight: **396 checks, 0 failures**, ~630
+million cells compared against the raw files. Each store then took its
+provenance and discovery attributes, and an immutable tag
+`<release>-<product>-<layout>-verified-20260914`. A store carries a
+`verification` attribute only because the verifier actually passed on it.
+
+Garbage collection ran on `v_2_8.past.temporal` alone -- the only store holding
+real orphans, 600 chunks left by a walltime-killed bench block, 3.57 GiB. The
+other seven hold only icechunk's per-commit snapshot forks, which `--gc` reports
+but which reclaim **0.00 GiB**, so it was deliberately not run there. See
 [TESTING.md](TESTING.md).
 
 [STATE.md](STATE.md) is the current working state and the place to pick up from;
