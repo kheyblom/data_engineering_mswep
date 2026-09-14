@@ -15,6 +15,21 @@ if [[ -z ${PBS_ENVIRONMENT:-} ]]; then
         echo "       export it in ~/.bashrc, or submit with qsub -A <PROJECT>" >&2
         exit 1
     fi
+    # refuse before anything reaches the scheduler. CONFIG is required (see the
+    # note further down); catching it here means a mistyped or missing config
+    # costs nothing rather than queuing a job that dies on startup.
+    if [[ -z ${CONFIG:-} ]]; then
+        echo "error: CONFIG is not set" >&2
+        echo "       CONFIG=config/config_zarr_<release>_<product>_<layout>.yaml $0" >&2
+        echo "       available:" >&2
+        ls config/config_zarr_*.yaml 2>/dev/null | sed 's/^/         /' >&2
+        exit 1
+    fi
+    if [[ ! -f ${CONFIG} ]]; then
+        echo "error: no such config: ${CONFIG}" >&2
+        exit 1
+    fi
+
     # the queue shape is not a #PBS directive either, since testing needs to
     # vary it and a directive cannot expand a variable: these defaults are the
     # production run, and a develop queue test overrides them in the
@@ -53,9 +68,7 @@ if [[ -z ${PBS_ENVIRONMENT:-} ]]; then
     if [[ -n ${AFTER:-} ]]; then
         qsub_args+=(-W "depend=${DEPEND}:${AFTER}")
     fi
-    if [[ -n ${CONFIG:-} ]]; then
-        qsub_args+=(-v "CONFIG=${CONFIG}")
-    fi
+    qsub_args+=(-v "CONFIG=${CONFIG}")
     # an absolute path so the submission does not depend on the caller's cwd
     exec qsub "${qsub_args[@]}" "$(readlink -f "$0")"
 fi
@@ -78,7 +91,21 @@ export OMP_NUM_THREADS=1
 # which matters when the job is sized close to its high water mark
 export MALLOC_TRIM_THRESHOLD_=0
 
-CONFIG="${CONFIG:-config/config_zarr_spatial.yaml}"
+# No default. There are eight production stores and a wrong default would
+# silently start building the wrong one -- tens of GiB and hours of walltime
+# before anyone notices. CONFIG is required, and is checked here rather than
+# left to fail later inside python.
+if [[ -z ${CONFIG:-} ]]; then
+    echo "error: CONFIG is not set" >&2
+    echo "       CONFIG=config/config_zarr_<release>_<product>_<layout>.yaml $0" >&2
+    echo "       available:" >&2
+    ls config/config_zarr_*.yaml 2>/dev/null | sed 's/^/         /' >&2
+    exit 1
+fi
+if [[ ! -f ${CONFIG} ]]; then
+    echo "error: no such config: ${CONFIG}" >&2
+    exit 1
+fi
 
 echo "job      ${PBS_JOBID:-interactive} on $(hostname)"
 echo "started  $(date)"

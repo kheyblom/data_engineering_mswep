@@ -1,0 +1,126 @@
+directories:
+  download: /glade/derecho/scratch/kheyblom/data/mswep/
+  logs: ./logs
+output_conventions:
+  filename: mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+  suffix: spatial
+log_file: mswep_zarr_v3_16_nrt_spatial.log
+version: V3.16
+# NRT, not Past. MSWEP publishes each release as two products that are NOT the
+# same data, so they get separate stores rather than being merged: the period is
+# carried in the store name and they can never resolve to the same filename.
+product: NRT/Daily
+variables: all
+grid_name: native_0p1x0p1
+
+# NRT is complete over its own span, 2024-10-30 to 2026-09-13: 684 files on a
+# 684 step axis. The key is still declared, empty, because check_coverage
+# compares against it either way -- an empty list asserts 'no gaps' rather than
+# leaving the question unasked.
+expected_missing_times: []
+
+# NOT set for this store. The -239976.0 sentinel is a V3.16 *Past* defect; the
+# NRT files carry no negative values at all. check_source_fill would abort the
+# build if a declared sentinel did not occur, so copying the Past config's key
+# here would fail loudly -- but it must not be copied in the first place.
+
+# one whole global map per chunk, 24.7 MiB of float32. A map is one chunk; a
+# point time series is the worst case, touching every chunk of the variable
+chunks:
+  time: 1
+  lat: -1
+  lon: -1
+timesteps_per_commit: 100
+num_workers: 4
+file_cache_maxsize: 32
+# the NRT files are chunked [1, 200, 200] like V3.16 Past, so one timestep is
+# 9 x 18 = 162 source chunks and 32 MiB covers a whole plane with room to spare
+chunk_cache_size_mib: 32
+
+# Store global attributes. Every string is templated over the same config fields
+# the filename template uses, so {version_label} and friends stay in one place.
+# Coverage and grid attributes are not here: derive_attrs reads them off the
+# data so they cannot drift from what was actually written.
+#
+# 'history', 'date_created' and 'verification' are deliberately absent: they
+# describe a build and an audit that have not happened yet, and are written by
+# finalize_mswep_zarr.py --attrs once they have. A store must not carry a claim
+# it has not earned.
+attrs:
+  title: >-
+    MSWEP {version_label} NEAR-REAL-TIME daily precipitation, native 0.1 degree
+    global grid, 2024-2026
+  summary: >-
+    The near-real-time (NRT) stream of the Multi-Source Weighted-Ensemble
+    Precipitation (MSWEP) {version_label} daily product, on its native 0.1
+    degree global grid, stored as an icechunk-backed zarr store. A single
+    variable, precipitation, merged from one netCDF file per day onto one
+    time/lat/lon grid.
+  # the single most important thing a consumer of this store needs to know
+  product_caveat: >-
+    THIS IS THE NEAR-REAL-TIME PRODUCT, NOT THE GAUGE-CORRECTED ONE. MSWEP NRT
+    is produced with low latency and is not the same estimate as the Past
+    (reanalysis) product, which applies gauge correction. Where the sibling Past
+    store covers the same day, PREFER THE PAST STORE. Measured in the 34 day
+    overlap of the V2.8 release, the two products correlate 0.94-0.96 with an
+    RMSE of about 1.9 mm/day and a bias under 0.1 mm/day, and only ~15 per cent
+    of cells are identical; the difference is small in the mean but not
+    negligible cell by cell. This store exists to carry the record past the end
+    of the Past product, not to replace it.
+  # ACDD rather than CF, deliberately: see cf_compliance
+  Conventions: ACDD-1.3
+  cf_compliance: >-
+    Not CF compliant. The variable's units are carried through unaltered from
+    the upstream MSWEP netCDF files, spelled 'mm/d', which udunits does not
+    parse; the upstream files carry no standard_name and no long_name at all.
+    Correcting the units would mean diverging from upstream, so they are left
+    as published and the descriptive names are supplied through variable_attrs
+    instead.
+  source: >-
+    MSWEP {version_label} {period} {temporal_resolution} netCDF files, one file
+    per day, downloaded from the GloH2O Google Drive distribution by
+    access_mswep
+  creator_name: Kyle Heyblom
+  creator_email: heyblom@umich.edu
+  references: >-
+    http://www.gloh2o.org/mswep/ -- Beck et al. (2019), MSWEP V2 global
+    3-hourly 0.1 degree precipitation, Bulletin of the American Meteorological
+    Society 100(3), doi:10.1175/BAMS-D-17-0138.1
+  chunking: >-
+    Chunked (time, lat, lon) = (1, 1800, 3600), float32, zstd: one whole global
+    map per chunk, 24.7 MiB. Built for reading maps and fields. A point time
+    series is the worst case for this layout, touching every chunk of the
+    variable; for that access pattern read the sibling
+    mswep.{version}.{period}.{temporal_resolution}.{grid_name}.temporal.zarr
+    instead, which holds the same data chunked along time.
+  related_store: >-
+    Three siblings hold the same variable on the same grid. Same product, other
+    layout: mswep.{version}.nrt.{temporal_resolution}.{grid_name}.temporal.zarr,
+    chunked one tile through the whole record per chunk. The gauge-corrected
+    Past product, which should be preferred wherever it overlaps this one:
+    mswep.{version}.past.{temporal_resolution}.{grid_name}.spatial.zarr and
+    mswep.{version}.past.{temporal_resolution}.{grid_name}.temporal.zarr, which
+    cover 1979-01-01 to 2025-06-29. Every store is built from and verified
+    against the raw files independently rather than derived from another.
+  known_data_gaps: >-
+    None. This store's 684 day axis is complete and regularly spaced: every day
+    from 2024-10-30 to 2026-09-13 is present and was written from its own raw
+    file. Unlike the sibling V3.16 Past store, the NRT files carry no undeclared
+    fill sentinel, so nothing was masked.
+
+# Attributes to put on the data variables themselves. MSWEP's files carry only
+# 'units' and 'least_significant_digit', with no long_name and no standard_name,
+# so unlike GLEAM there is a real gap here rather than upstream metadata to
+# preserve. Anything set here goes on top of what the files carry; 'units' is
+# deliberately not overridden, so the upstream spelling survives.
+variable_attrs:
+  precipitation:
+    long_name: Precipitation
+    # a genuine CF standard name, unlike the units; the quantity is a flux even
+    # though it is published in mm/d rather than the canonical kg m-2 s-1
+    standard_name: precipitation_flux
+    comment: >-
+      Daily total precipitation from the MSWEP near-real-time stream, NOT
+      gauge-corrected -- see the store's product_caveat attribute. Values are
+      quantised upstream; see the least_significant_digit attribute carried over
+      from the source files, so not all of the float32 precision is meaningful.

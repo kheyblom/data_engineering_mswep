@@ -18,11 +18,35 @@ Structured like
 one build script driven by one YAML config per store, a thin `utils/` layer, a
 read-only verifier, and a separate script for the mutating finalization steps.
 
+## The stores
+
+MSWEP publishes each release as two products that are **not** the same estimate:
+`Past` is the gauge-corrected reanalysis, `NRT` the near-real-time stream, and
+`Past` stops well short of the present in both releases. They are kept as
+separate stores rather than merged. Each product gets a spatial and a temporal
+layout, so eight stores in all:
+
+| store | record | days | best for |
+|---|---|---|---|
+| `mswep.v_3_16.past.daily.native_0p1x0p1.spatial.zarr` | 1979-01-01 .. 2025-06-29 | 16,982 | maps, fields |
+| `mswep.v_3_16.past.daily.native_0p1x0p1.temporal.zarr` | " | " | point time series |
+| `mswep.v_3_16.nrt.daily.native_0p1x0p1.spatial.zarr` | 2024-10-30 .. 2026-09-13 | 684 | maps, fields |
+| `mswep.v_3_16.nrt.daily.native_0p1x0p1.temporal.zarr` | " | " | point time series |
+| `mswep.v_2_8.past.daily.native_0p1x0p1.spatial.zarr` | 1979-01-02 .. 2020-12-30 | 15,339 | maps, fields |
+| `mswep.v_2_8.past.daily.native_0p1x0p1.temporal.zarr` | " | " | point time series |
+| `mswep.v_2_8.nrt.daily.native_0p1x0p1.spatial.zarr` | 2020-11-27 .. 2026-09-13 | 2,117 | maps, fields |
+| `mswep.v_2_8.nrt.daily.native_0p1x0p1.temporal.zarr` | " | " | point time series |
+
+They live under `<download>/<version>/zarr/`. **Prefer a Past store wherever it
+covers the day you want** — every store's `product_caveat` attribute says so,
+and the NRT stores say plainly that they are not gauge-corrected.
+
 ## Status
 
 The build pipeline is written and validated on a one-year fixture, both write
-strategies, including interrupt and resume. Nothing has been built at production
-scale, and the chunking still needs sign-off.
+strategies, including interrupt and resume. All 12 configs (8 production +
+4 bench) are written and pass the Tier 0 checks. **Nothing has been built at
+production scale yet**, and `verify_mswep_zarr.py` does not exist.
 
 [STATE.md](STATE.md) is the current working state and the place to pick up from;
 [TASKS.md](TASKS.md) is the task list; [TESTING.md](TESTING.md) records what was
@@ -34,13 +58,27 @@ which `data_engineering_gleam` findings transfer here.
 ```bash
 uv sync    # create/refresh .venv from uv.lock; Python is pinned >=3.13,<3.14
 
-# build a store; the config decides everything, including which write strategy
-uv run python mswep_zarr.py --config config/config_zarr_spatial.yaml
-uv run python mswep_zarr.py --config config/config_zarr_temporal.yaml
+# build a store; the config decides everything, including which write strategy.
+# One config per store -- config/config_zarr_<release>_<product>_<layout>.yaml
+uv run python mswep_zarr.py --config config/config_zarr_v3_16_past_spatial.yaml
+uv run python mswep_zarr.py --config config/config_zarr_v3_16_nrt_temporal.yaml
+uv run python mswep_zarr.py --config config/config_zarr_v2_8_past_spatial.yaml   # ...and so on
 
 # the one-year correctness fixture (see TESTING.md for how to stage it)
 uv run python mswep_zarr.py --config config/config_zarr_tiny_spatial.yaml
 uv run python mswep_zarr.py --config config/config_zarr_tiny_temporal.yaml
+```
+
+Production builds go through the batch queue. `CONFIG` is **required** --
+there is no default, because a wrong one would silently start building the
+wrong store:
+
+```bash
+QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=02:00:00 \
+    CONFIG=config/config_zarr_v3_16_nrt_spatial.yaml ./submit_mswep_zarr.sh
+
+# chain a resume behind a running job so the two never write the store at once
+AFTER=<jobid> CONFIG=<same config> ./submit_mswep_zarr.sh
 ```
 
 A run is restartable: relaunching with the same config resumes from the last

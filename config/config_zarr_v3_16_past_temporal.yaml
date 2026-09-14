@@ -7,13 +7,13 @@ output_conventions:
   # grid, chunked for the opposite access pattern
   suffix: temporal
 # not shared with the spatial build, so one store's forensics stay readable
-log_file: mswep_zarr_temporal.log
+log_file: mswep_zarr_v3_16_past_temporal.log
 version: V3.16
 product: Past/Daily
 variables: all
 grid_name: native_0p1x0p1
 
-# see config_zarr_spatial.yaml; the two stores must declare the same gaps or
+# see config_zarr_v3_16_past_spatial.yaml; the two stores must declare the same gaps or
 # they are not the same record
 expected_missing_times:
   - 1993-08-29
@@ -85,7 +85,7 @@ file_cache_maxsize: 64
 # of them, so 16 MiB per file is already generous
 chunk_cache_size_mib: 16
 
-# Store global attributes. See config_zarr_spatial.yaml for why 'history',
+# Store global attributes. See config_zarr_v3_16_past_spatial.yaml for why 'history',
 # 'date_created' and 'verification' are absent here and written by
 # finalize_mswep_zarr.py once they have been earned.
 attrs:
@@ -97,6 +97,14 @@ attrs:
     {version_label} daily product on its native 0.1 degree global grid, stored
     as an icechunk-backed zarr store. A single variable, precipitation, merged
     from one netCDF file per day onto one time/lat/lon grid.
+  product_caveat: >-
+    This is the gauge-corrected (Past) product and it ENDS AT 2025-06-29. For
+    later dates use the sibling NRT store of this release, which carries the
+    record to 2026-09-13 but is NOT gauge-corrected. The two products overlap on
+    243 days, 2024-10-30 to 2025-06-29; prefer this store across that overlap.
+    Measured in the equivalent overlap of the V2.8 release, Past and NRT
+    correlate 0.94-0.96 with an RMSE of about 1.9 mm/day and a bias under
+    0.1 mm/day, and only ~15 per cent of cells are identical.
   # ACDD rather than CF, deliberately: see cf_compliance
   Conventions: ACDD-1.3
   cf_compliance: >-
@@ -125,11 +133,14 @@ attrs:
     mswep.{version}.{period}.{temporal_resolution}.{grid_name}.spatial.zarr
     instead, which holds the same data chunked (1, 1800, 3600).
   related_store: >-
-    mswep.{version}.{period}.{temporal_resolution}.{grid_name}.spatial.zarr --
-    the same variable on the same grid over the same period, chunked one whole
-    global map per chunk. Identical values; the two differ only in chunking, and
-    each is built from and verified against the raw files independently rather
-    than derived from the other.
+    Three siblings hold the same variable on the same grid. Same product, other
+    layout: mswep.{version}.past.{temporal_resolution}.{grid_name}.spatial.zarr,
+    chunked one whole global map per chunk. The near-real-time product, which
+    continues past the end of this one but is not gauge corrected:
+    mswep.{version}.nrt.{temporal_resolution}.{grid_name}.spatial.zarr and
+    mswep.{version}.nrt.{temporal_resolution}.{grid_name}.temporal.zarr,
+    covering 2024-10-30 to 2026-09-13. Every store is built from and verified
+    against the raw files independently rather than derived from another.
   known_data_gaps: >-
     MSWEP {version_label} does not publish 1993-08-29 or 1993-08-31. The store
     covers the complete daily axis and both days are present and entirely fill
@@ -148,7 +159,7 @@ attrs:
     the whole record, so the array holds 16151 chunks rather than 16200 and that
     is correct.
 
-# see config_zarr_spatial.yaml; the two stores must describe the variable
+# see config_zarr_v3_16_past_spatial.yaml; the two stores must describe the variable
 # identically or the metadata comparison between them fails
 variable_attrs:
   precipitation:

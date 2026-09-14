@@ -1,0 +1,174 @@
+# Tier 2 config for the region path: the real raw tree, the real chunking and
+# the real production block, but a throwaway store under a 'bench_*' suffix.
+#
+# What it is for is peak memory and per-block wall time, neither of which the
+# one-year fixture can show: a fixture block is 1.05 GiB and a production block
+# is tens of GiB. GLEAM's equivalent 45.1 GiB block measured 70-80 GB resident,
+# so that is the number to check this against.
+#
+# One or two committed blocks is enough to measure. The ONLY differences from
+# the production config are the suffix and the log file. Delete the store
+# afterwards.
+directories:
+  download: /glade/derecho/scratch/kheyblom/data/mswep/
+  logs: ./logs
+output_conventions:
+  filename: mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+  # sibling of the 'spatial' store built from the same files: same data, same
+  # grid, chunked for the opposite access pattern
+  suffix: bench_temporal
+# not shared with the spatial build, so one store's forensics stay readable
+log_file: mswep_zarr_bench_v2_8_past_temporal.log
+# V2.8, spelled with two parts. format_version keeps however many parts the
+# release carries, so this becomes 'v_2_8' on disk against V3.16's 'v_3_16'.
+version: V2.8
+# Past, the gauge-corrected reanalysis product, kept in its own store rather
+# than merged with NRT: the two are not the same estimate.
+product: Past/Daily
+variables: all
+grid_name: native_0p1x0p1
+
+# V2.8 Past is complete over its span, 1979-01-02 to 2020-12-30: 15,339 files on
+# a 15,339 step axis, with no missing day anywhere. Declared empty rather than
+# omitted, because check_coverage compares against it either way -- an empty
+# list asserts 'no gaps' rather than leaving the question unasked.
+expected_missing_times: []
+
+# NOT set for this store. The -239976.0 sentinel is a V3.16 Past defect; V2.8
+# carries no negative values at all, in either product.
+
+# one chunk holds a 2 x 2 degree tile through the whole record, 23.4 MiB of
+# float32. A point time series is one chunk; a global map is 16200 of them
+chunks:
+  time: -1
+  lat: 20
+  lon: 20
+# a store chunked across the whole time axis has no append boundary to stop at,
+# so it is written as a skeleton and filled in place, one block per commit
+write_strategy: region
+# lat: 200 keeps the block a whole number of the 20 cell output chunks, which a
+# region write requires, and matches the block used by every other store here.
+# Note it does NOT align with this release's source chunking the way it does for
+# V3.16: the V2.8 files are chunked [1, 32, 32] and 1800 / 32 = 56.25, so the
+# source grid does not tile the axis evenly and no block size can align with it
+# exactly. A 200 row block straddles at most one row of source chunks at each
+# edge, which is the cheapest misalignment available.
+#
+# lon: -1 because a block narrower than the globe reads a strided subset of the
+# source chunks rather than contiguous runs. At 15339 timesteps a block is
+# 41.1 GiB resident, and there are 9 of them.
+block_shape:
+  lat: 200
+  lon: -1
+# timesteps pulled out of the lazy dataset per read. One MSWEP file is one
+# timestep, so reading a block chunk by chunk would be ~15,000 scheduler round
+# trips per block; a year at a time is ~950 MiB of transient buffer.
+timesteps_per_read: 365
+# the region path reads serially behind one process-global HDF5 lock, so extra
+# workers buy little; matched to the ncpus this build asks for
+num_workers: 1
+# a block reads every file of the record once, so nothing is re-read within a
+# block and the cache only has to avoid thrashing rather than hold a working set
+file_cache_maxsize: 64
+# The V2.8 files are chunked [1, 32, 32], NOT the [1, 200, 200] of V3.16, so a
+# (1, 200, 3600) block read touches ceil(200/32) x ceil(3600/32) = 7 x 113 = 791
+# source chunks of 4 KiB against 1 x 18 = 18 chunks of 160 KiB in V3.16 --
+# roughly 44x more chunk operations for the same bytes. This is why the V3.16
+# bench does not predict what this build costs. Costs file_cache_maxsize x this
+# much memory in the worst case.
+chunk_cache_size_mib: 64
+# HDF5 hashes chunks into this many slots, and the library default of 2003 is
+# far below the 6441 chunks a single plane touches, so the cache would evict
+# chunks it is about to need. 8009 is the next convenient prime above 6441.
+# This key is the main reason a V2.8 config cannot be a copy of a V3.16 one.
+chunk_cache_slots: 8009
+
+# Store global attributes. Every string is templated over the same config fields
+# the filename template uses, so {version_label} and friends stay in one place.
+# Coverage and grid attributes are not here: derive_attrs reads them off the
+# data so they cannot drift from what was actually written.
+#
+# 'history', 'date_created' and 'verification' are deliberately absent: they
+# describe a build and an audit that have not happened yet, and are written by
+# finalize_mswep_zarr.py --attrs once they have. A store must not carry a claim
+# it has not earned.
+attrs:
+  title: >-
+    MSWEP {version_label} daily precipitation, native 0.1 degree global grid,
+    1979-2020
+  summary: >-
+    The gauge-corrected (Past) Multi-Source Weighted-Ensemble Precipitation
+    (MSWEP) {version_label} daily product, on its native 0.1 degree global grid,
+    stored as an icechunk-backed zarr store. A single variable, precipitation,
+    merged from one netCDF file per day onto one time/lat/lon grid.
+  product_caveat: >-
+    This is the gauge-corrected product and it ENDS AT 2020-12-30. For later
+    dates use the sibling NRT store of this release, which carries the record to
+    2026-09-13 but is not gauge-corrected, or the newer V3.16 release whose Past
+    product runs to 2025-06-29. The two V2.8 products overlap on 34 days,
+    2020-11-27 to 2020-12-30; prefer this store over NRT across that overlap.
+  # ACDD rather than CF, deliberately: see cf_compliance
+  Conventions: ACDD-1.3
+  cf_compliance: >-
+    Not CF compliant. The variable's units are carried through unaltered from
+    the upstream MSWEP netCDF files, spelled 'mm d-1', which udunits does not
+    parse; the upstream files carry no standard_name and no long_name at all.
+    Note this release spells the units differently from V3.16 and from its own
+    NRT product, both of which use 'mm/d'. Correcting them would mean diverging
+    from upstream, so they are left as published and the descriptive names are
+    supplied through variable_attrs instead.
+  source: >-
+    MSWEP {version_label} {period} {temporal_resolution} netCDF files, one file
+    per day, downloaded from the GloH2O Google Drive distribution by
+    access_mswep
+  creator_name: Kyle Heyblom
+  creator_email: heyblom@umich.edu
+  references: >-
+    http://www.gloh2o.org/mswep/ -- Beck et al. (2019), MSWEP V2 global
+    3-hourly 0.1 degree precipitation, Bulletin of the American Meteorological
+    Society 100(3), doi:10.1175/BAMS-D-17-0138.1
+  chunking: >-
+    Chunked (time, lat, lon) = (15339, 20, 20), float32, zstd: one 2 x 2 degree
+    tile through the whole record per chunk, 23.4 MiB. Built for reading time
+    series -- a series at any point is a single chunk. A global map is the worst
+    case for this layout, touching all 16200 chunks of the variable; for maps
+    and fields read the sibling
+    mswep.{version}.{period}.{temporal_resolution}.{grid_name}.spatial.zarr
+    instead, which holds the same data chunked (1, 1800, 3600).
+  related_store: >-
+    Three siblings hold the same variable on the same grid. Same product, other
+    layout: mswep.{version}.past.{temporal_resolution}.{grid_name}.spatial.zarr,
+    chunked one whole global map per chunk. The near-real-time
+    product, which continues past the end of this one but is not gauge
+    corrected: mswep.{version}.nrt.{temporal_resolution}.{grid_name}.spatial.zarr
+    and mswep.{version}.nrt.{temporal_resolution}.{grid_name}.temporal.zarr,
+    covering 2020-11-27 to 2026-09-13. Every store is built from and verified
+    against the raw files independently rather than derived from another.
+  source_quantisation: >-
+    The upstream files declare least_significant_digit = 1, so values are
+    quantised to one decimal place before compression -- coarser than the
+    2 decimal places of V3.16 and of this release's own NRT product. Not all of
+    the float32 precision is meaningful.
+  known_data_gaps: >-
+    None. This store's 15339 day axis is complete and regularly spaced: every
+    day from 1979-01-02 to 2020-12-30 is present and was written from its own
+    raw file. Unlike the V3.16 Past store, this release publishes no undeclared
+    fill sentinel, so nothing was masked. No tile is NaN across the whole
+    record, so all 16200 chunks of the array were written.
+
+# Attributes to put on the data variables themselves. MSWEP's files carry only
+# 'units' and 'least_significant_digit', with no long_name and no standard_name,
+# so unlike GLEAM there is a real gap here rather than upstream metadata to
+# preserve. Anything set here goes on top of what the files carry; 'units' is
+# deliberately not overridden, so the upstream spelling survives.
+variable_attrs:
+  precipitation:
+    long_name: Precipitation
+    # a genuine CF standard name, unlike the units; the quantity is a flux even
+    # though it is published in mm d-1 rather than the canonical kg m-2 s-1
+    standard_name: precipitation_flux
+    comment: >-
+      Daily total precipitation, gauge-corrected. Values are quantised upstream
+      to one decimal place -- see the least_significant_digit attribute carried
+      over from the source files -- so not all of the float32 precision is
+      meaningful.

@@ -8,15 +8,25 @@ Convert the raw MSWEP precipitation netCDF files downloaded by
 [access_mswep](/glade/u/home/kheyblom/work/data_access/access_mswep) into
 icechunk-backed zarr stores on NCAR Derecho/GLADE.
 
-Two stores are built from the same raw files, differing only in chunking and so
-in which read is cheap: a **spatial** store (one global map per chunk, for
-reading fields) and a **temporal** store (one small lat/lon tile through the
-whole record per chunk, for reading point time series). Neither is derived from
-the other — both are built from raw and verified against raw independently — so
-nothing about one has to be trusted to trust the other. That independence is a
-deliberate choice carried over from `data_engineering_gleam`, not an accident of
-how it was built; do not "optimise" the temporal build into a rechunk of the
-spatial store.
+**Eight stores**, one pair per raw product: {V3.16, V2.8} x {past, nrt} x
+{spatial, temporal}. Each pair is built from the same raw files and differs only
+in chunking, and so in which read is cheap: a **spatial** store (one global map
+per chunk, for reading fields) and a **temporal** store (one 2 x 2 degree tile
+through the whole record per chunk, for reading point time series).
+
+**Nothing here is derived from anything else.** Every store is built from the
+raw netCDF files and verified against them independently, so nothing about one
+store has to be trusted to trust another. That is a deliberate choice carried
+over from `data_engineering_gleam`: do not "optimise" a temporal build into a
+rechunk of its spatial sibling, and do not merge Past with NRT.
+
+One config drives one store, and the store's name carries the release, the
+product and the layout:
+
+```
+mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+mswep.v_3_16.past.daily.native_0p1x0p1.spatial.zarr
+```
 
 **This project is modelled directly on
 [data_engineering_gleam](/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam).**
@@ -53,9 +63,20 @@ numbers if the download is ever refreshed.
                                            v_3_16     past/daily     1979   1979001.nc
 ```
 
-- Versions on disk: `v_3_16` (16,980 files, 81.67 GB) and `v_2_8` (15,339
-  files, 51.84 GB), counting the `past/daily` product only; both versions also
-  carry an `nrt/daily` product that no config here reads. V3.16 is the target.
+MSWEP publishes each release as two products, and **they are not the same
+data**. `Past` is the gauge-corrected reanalysis; `NRT` is the near-real-time
+stream. `Past` stops well short of the present in both releases and `NRT`
+carries the record forward, so a Past-only store silently ends years ago.
+
+**Four raw products are on disk, and each gets its own pair of stores.**
+
+| product | files | span | gaps | source chunks | lsd | units | time dtype | corner defect |
+|---|---|---|---|---|---|---|---|---|
+| `v_3_16/past` | 16,980 | 1979-01-01 .. 2025-06-29 | **2** | `[1,200,200]` | 2 | `mm/d` | float32 | **yes** |
+| `v_3_16/nrt` | 684 | 2024-10-30 .. 2026-09-13 | 0 | `[1,200,200]` | 2 | `mm/d` | float32 | no |
+| `v_2_8/past` | 15,339 | 1979-01-02 .. 2020-12-30 | 0 | `[1,32,32]` | 1 | `mm d-1` | int32 | no |
+| `v_2_8/nrt` | 2,117 | 2020-11-27 .. 2026-09-13 | 0 | `[1,32,32]`→`[1,200,200]` | 2 | `mm/d` | float32 | no |
+
 - The version is spelled `V3.16` in the config and `v_3_16` on disk, and the
   product `Past/Daily` becomes `past/daily`. `access_mswep`'s `format_version`
   and `format_product` are the reference implementations of both translations;
@@ -65,21 +86,65 @@ numbers if the download is ever refreshed.
 - **One file per day**, not per year, and **one variable**, `precipitation`.
   Both differ from GLEAM and both change the cost model — see below.
 - Grid: `lat` 1800 (89.95 N to -89.95 S, north-to-south), `lon` 3600
-  (-179.95 to 179.95), 0.1 degree, float32. **Identical to the GLEAM grid**, so
-  GLEAM's spatial chunk reasoning transfers directly.
-- `time` is one step per file, float32 (v3.16) / int32 (v2.8)
-  `days since 1900-1-1 00:00:00`. First 28854 (1979-01-01), last 45835
-  (2025-06-29).
-- `precipitation`: float32, `_FillValue = -9999.f`, `units = 'mm/d'` (v3.16) or
-  `'mm d-1'` (v2.8), `least_significant_digit = 2` (v3.16) / `1` (v2.8).
-  There is no `standard_name` and no `long_name` on the data variable.
-- Full record uncompressed: 16,980 x 1800 x 3600 x 4 B = **410 GiB**. Raw on
-  disk is 81.67 GB, so the source compresses about 5.4x.
+  (-179.95 to 179.95), 0.1 degree, float32, identical in all four products.
+  **Identical to the GLEAM grid**, so GLEAM's spatial chunk reasoning transfers.
+- `precipitation` carries no `standard_name` and no `long_name`; both are
+  supplied through each config's `variable_attrs`.
+- `_FillValue = -9999.f` is declared by all four and **used by none** — see the
+  V3.16 Past section below for what is actually written instead.
 
-### The declared fill value is not the one in the data (V3.16)
+### Past and NRT are separate stores, by decision (2026-09-13)
+
+They are **not** merged, and the temporal stores are not derived from the
+spatial ones. Measured across V2.8's 34-day Past/NRT overlap, the two products
+correlate 0.94-0.96 with RMSE ~1.9 mm/day, bias under 0.1 mm/day, and only ~15%
+of cells identical. Merging would bury that discontinuity inside one array;
+separate stores let a consumer choose the corrected record or the current one,
+and every store's `product_caveat` attribute says which to prefer where they
+overlap (always `Past`).
+
+Overlap, where both products of a release cover the same day: V3.16 = 243 days
+(2024-10-30 .. 2025-06-29), V2.8 = 34 days (2020-11-27 .. 2020-12-30). Nothing
+has to be resolved — both stores simply cover those days.
+
+### V2.8 is chunked `[1, 32, 32]`, and that changes what a read costs
+
+This is the single most important difference between the two releases, and the
+reason a V3.16 measurement does not predict a V2.8 one:
+
+- One timestep is **57 x 113 = 6,441** source chunks of 4 KiB, against
+  **9 x 18 = 162** chunks of 160 KiB in V3.16.
+- A `(1, 200, 3600)` region block read touches ~791 source chunks against 18 —
+  roughly **44x more chunk operations for the same bytes**.
+- `DEFAULT_CHUNK_CACHE_SLOTS` is 2003, far below 6,441, so HDF5 would evict
+  chunks it is about to need. **The V2.8 configs set `chunk_cache_slots: 8009`**
+  (the next convenient prime above 6,441) and `chunk_cache_size_mib: 64`
+  (a decompressed plane is 6,441 x 4 KiB = 25.8 MiB).
+- `block_shape.lat: 200` cannot align with a 32-row source grid — 1800/32 =
+  56.25, so the source grid does not tile the axis evenly and **no** block size
+  aligns exactly. 200 straddles at most one row of source chunks per edge, which
+  is the cheapest misalignment available.
+- `v_2_8/nrt` changes chunking partway through its record (`[1,32,32]` early,
+  `[1,200,200]` late). Correctness is unaffected — dask chunks come from the
+  explicit `chunks=` argument, not from the file — but throughput varies.
+
+### The `int32` time in V2.8 Past is real, and harmless
+
+`ncdump` reports `int time(time)` for V2.8 Past and `float time(time)` for the
+other three; a scan of 84 files across all 42 years found int32 in every one.
+GloH2O changed its writer after V2.8 Past. It does not affect the build: the
+values are whole-day offsets so int32 holds them exactly, float32 is also exact
+at these magnitudes (integers exact to 2^24 = 16,777,216 against a largest
+offset of 46,265), and `build_encoding` pins every store to int64
+`days since 1900-01-01`, proleptic_gregorian regardless. Recorded so the next
+person who notices it does not have to re-check.
+
+### The declared fill value is not the one in the data (V3.16 **Past** only)
 
 `precipitation:_FillValue = -9999.f`, and that value **occurs nowhere in the
-record**. The sentinel actually written is **`-239976.0`**, which is
+V3.16 Past record**. V3.16 NRT and both V2.8 products are clean — they carry no
+negative values at all — so `source_fill_values` is set on **exactly one of the
+eight configs**. The sentinel actually written is **`-239976.0`**, which is
 `-9999 x 24` — the fill summed over the 24 hourly steps a daily total is
 aggregated from, so upstream did not propagate the mask through the
 aggregation. Because the value in the data does not match the attribute,
@@ -145,7 +210,7 @@ V3.16 is the same magnitude as the signal. Splicing it in would insert a
 real data. V2.8 also ends 2020-12-30 against V3.16's 2025-06-29, so ~1,642 of
 16,982 days could not be backfilled at all.
 
-### Known gap in V3.16
+### Known gap in V3.16 Past
 
 `1993241.nc` (1993-08-29) and `1993243.nc` (1993-08-31) **do not exist** in the
 V3.16 remote. The download verified 16,980/16,980 against the remote listing, so
@@ -257,23 +322,27 @@ spent once.
   end to end. **MSWEP source chunks are one timestep deep**: `[1, 200, 200]` in
   v3.16 and `[1, 32, 32]` in v2.8. There is nothing to re-decompress, so the
   large chunk cache buys little. Size it and confirm by measurement rather than
-  copying 512.
+  copying 512. What *does* matter for v2.8 is `chunk_cache_slots`, not the cache
+  size — see the `[1, 32, 32]` section above.
 - **There is one variable, not fourteen.** So: no cross-variable merge and no
   `join='exact'` time-axis check between variables (the equivalent completeness
   check has to be against the expected *date* range instead — see the 1993 gap);
   no variable-major block ordering; the region build has roughly 1/14 the blocks
   GLEAM's did, which makes resume granularity coarser and worth thinking about.
   It also makes GLEAM's "split into one store per variable" outstanding work
-  (`OUTSTANDING.md` there) moot here.
+  (`OUTSTANDING.md` there) moot here — the axis this collection splits along is
+  release and product, not variable.
 - **~17,000 input files, not 644.** `open_mfdataset` over 16,980 files is itself
   a cost before any data is read, and `file_cache_maxsize` now bounds a cache
   that cannot possibly hold the whole set. On the region path a block spans
   every file, so each of the 9-ish blocks reopens all ~17,000 — measure that
   open cost before sizing the block, because it is a term GLEAM never had.
-- **Source spatial chunks are 200x200 (v3.16).** 1800/200 = 9 and 3600/200 = 18
-  exactly, so a `block_shape.lat` of 200 aligns perfectly with the source chunk
-  grid and reads 18 contiguous chunks per file. A block that is not a multiple
-  of 200 re-reads source chunks across block boundaries.
+- **Source spatial chunks differ by release.** In v3.16 they are 200x200, and
+  1800/200 = 9 and 3600/200 = 18 exactly, so `block_shape.lat: 200` aligns
+  perfectly and reads 18 contiguous chunks per file. In v2.8 they are 32x32 and
+  1800/32 = 56.25, so **no** block size aligns; 200 is kept for uniformity and
+  straddles at most one row of source chunks per edge. Never assume one
+  release's read profile predicts the other's.
 - **The raw tree is `raw/<product>/<year>/` with one file per day**, not
   `raw/<resolution>/<variable>/` with one file per year. Path construction,
   variable discovery and the `variables: all` shorthand all have to be rethought

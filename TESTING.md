@@ -177,27 +177,54 @@ larger in production than in the fixture. Tier 2 has to confirm both.
 
 ## Tier 2: the bench jobs
 
-Approved 2026-09-13. Two jobs, each against the real raw tree with the real
-production settings, writing a **throwaway** store. Both configs differ from
-their production counterparts only in `output_conventions.suffix` and
-`log_file`.
+Approved 2026-09-13. **Four** jobs, not two: one per release per write strategy,
+each against the real raw tree with the real production settings, writing a
+**throwaway** store. Each bench config differs from its production counterpart
+only in `output_conventions.suffix` and `log_file` — verified by diff.
+
+### Why V2.8 needs its own bench
+
+The V3.16 numbers do not predict V2.8, because the two releases are chunked
+differently at source:
+
+| | V3.16 | V2.8 |
+|---|---|---|
+| source chunk | `[1, 200, 200]` | `[1, 32, 32]` |
+| chunk size | 160 KiB | 4 KiB |
+| chunks per timestep | 9 x 18 = **162** | 57 x 113 = **6,441** |
+| chunks touched by a `(1,200,3600)` block read | 18 | ~791 |
+
+That is roughly **44x more chunk operations for identical bytes**. It also means
+the default `chunk_cache_slots` of 2003 is far below the 6,441 chunks one V2.8
+plane touches, so the V2.8 configs set `chunk_cache_slots: 8009` and
+`chunk_cache_size_mib: 64`. Whether that is enough is one of the things the
+bench measures.
 
 ```bash
-# append path. ~1 GB resident is the expectation (4 workers x 24.7 MiB chunks
-# plus 32 files x 32 MiB of chunk cache), so 16 GB is already generous.
+# V3.16 Past -- append, then region
 QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=02:00:00 \
-    CONFIG=config/config_zarr_bench_spatial.yaml ./submit_mswep_zarr.sh
-
-# region path. One block is held whole, so this needs memory rather than cpus:
-# GLEAM's equivalent 45.1 GiB block measured 70-80 GB resident at NCPUS=1, and
-# a shared develop job gets a flat 10 GB default whatever ncpus it asks for.
+    CONFIG=config/config_zarr_bench_v3_16_past_spatial.yaml ./submit_mswep_zarr.sh
 QUEUE=develop NCPUS=1 MEM=96GB WALLTIME=03:00:00 \
-    CONFIG=config/config_zarr_bench_temporal.yaml ./submit_mswep_zarr.sh
+    CONFIG=config/config_zarr_bench_v3_16_past_temporal.yaml ./submit_mswep_zarr.sh
+
+# V2.8 Past -- same shapes; this is the pair whose cost is unknown
+QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=02:00:00 \
+    CONFIG=config/config_zarr_bench_v2_8_past_spatial.yaml ./submit_mswep_zarr.sh
+QUEUE=develop NCPUS=1 MEM=96GB WALLTIME=03:00:00 \
+    CONFIG=config/config_zarr_bench_v2_8_past_temporal.yaml ./submit_mswep_zarr.sh
 ```
 
-Neither needs to finish. The append path writes from timestep 0 in order, so a
-walltime kill just stops it and the per-commit log lines give throughput; the
-region path only needs one or two committed blocks to show peak memory and
+~22 core-hours if all four run to walltime. The `MEM=96GB` on the region jobs is
+sized from GLEAM, whose equivalent 45.1 GiB block measured 70-80 GB resident at
+`NCPUS=1`; our blocks are 45.5 GiB (V3.16) and 41.1 GiB (V2.8).
+
+The two NRT records are **not** benched: at 684 and 2,117 timesteps their
+production builds are small enough to be their own measurement, and their region
+blocks are 1.8 and 5.7 GiB rather than tens of GiB.
+
+Neither path needs to finish. The append path writes from timestep 0 in order,
+so a walltime kill just stops it and the per-commit log lines give throughput;
+the region path only needs one or two committed blocks to show peak memory and
 per-block wall time.
 
 What to read off them:
@@ -206,13 +233,25 @@ What to read off them:
 |---|---|---|
 | cold open | first log gap, before the first commit | same |
 | throughput | seconds per 100 step commit | seconds per block |
-| peak memory | `qhist` Mem column | `qhist` Mem column, against the 45.5 GiB block |
+| peak memory | `qhist` Mem column | `qhist` Mem column, against the block size |
 | compression | store bytes / timesteps written | store bytes / blocks written |
 | cpu efficiency | `qhist` CPU vs Elapsed x NCPUs | same |
 
-Then: delete both bench stores, size the production chain, and run Task 5.
+Then: delete the four bench stores, size the production chain, and build.
 
 ```bash
-rm -rf /glade/derecho/scratch/$USER/data/mswep/v_3_16/zarr/*.bench_spatial.zarr
-rm -rf /glade/derecho/scratch/$USER/data/mswep/v_3_16/zarr/*.bench_temporal.zarr
+rm -rf /glade/derecho/scratch/$USER/data/mswep/v_3_16/zarr/*.bench_*.zarr
+rm -rf /glade/derecho/scratch/$USER/data/mswep/v_2_8/zarr/*.bench_*.zarr
 ```
+
+## Tier 0 for the 8-store config set
+
+Run before any job is submitted; it costs nothing and reads no data. For each of
+the 12 configs it asserts the store name carries the right release and product,
+the axis length and gap count match the measured raw tree, `source_fill_values`
+is present on V3.16 Past and **absent everywhere else**, `chunk_cache_slots` is
+8009 on V2.8 and unset on V3.16, the temporal tile is 20 x 20, and every
+attribute template renders with no unsubstituted braces.
+
+Passed 2026-09-13 for all 12 configs. The exact script is in the approved plan
+and is cheap to re-run after any config edit.

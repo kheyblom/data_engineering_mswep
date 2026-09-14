@@ -1,19 +1,33 @@
 We need to build a pipeline to take raw MSWEP data and produce final zarr stores for downstream usage. We will work through each task one-at-a-time together.
 
 This project will conduct the following tasks:
-1. set up git repo
-2. build a codebase that will build zarr stores of MSWEP data
+1. [DONE 2026-09-13] set up git repo
+2. [DONE 2026-09-13] build a codebase that will build zarr stores of MSWEP data
     > Need to build zarr stores of MSWEP data downloaded by codebase in @/glade/u/home/kheyblom/work/data_access/access_mswep
     > Use overall structure and approach as in @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
     > Will need to have two zarr stores: one optimized for spatial retrieval (e.g., retriving all spatial locations at a single time step) and another optimized for temporal retireval (e.g., a time series of a single location). Design the codebase to be flexible for either scenario (like in @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam)
     > Output structure should be inline with @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
-3. determine a chunking strategy for spatial and temporal zarr stores
+3. [DONE 2026-09-13] determine a chunking strategy for spatial and temporal zarr stores
     > I need to approve final decisions for this
-4. test the codebase for the spatial zarr build. use a similar testing procedure as in @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
+4. [Tier 0 + Tier 1 DONE 2026-09-13; Tier 2 batch bench outstanding] test the codebase for the spatial zarr build. use a similar testing procedure as in @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
 5. after testing is complete and codebase is verified, run the spatial zarr build.
 6. verify the spatial zarr store. run a similar verification to @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
-7. test the codebase again for the temporal zarr build.
+7. [Tier 0 + Tier 1 DONE 2026-09-13; Tier 2 batch bench outstanding] test the codebase again for the temporal zarr build.
 8. verify the temporal zarr store
+
+SCOPE CHANGE, approved 2026-09-13. Tasks 4-8 were written for ONE spatial and
+ONE temporal store. MSWEP publishes each release as two products -- Past
+(gauge-corrected) and NRT (near-real-time) -- and Past stops well short of the
+present in both releases, so a Past-only store silently ends in 2025-06 (V3.16)
+or 2020-12 (V2.8). Past and NRT are kept as SEPARATE stores rather than merged,
+because they are measurably different estimates (corr 0.94-0.96, RMSE
+~1.9 mm/day where they overlap).
+
+Tasks 4-8 therefore cover 8 stores, not 2:
+    {V3.16, V2.8} x {past, nrt} x {spatial, temporal}
+Two further scripts are still needed and do not yet exist:
+    verify_mswep_zarr.py    - read-only audit, required by tasks 6 and 8
+    finalize_mswep_zarr.py  - attrs, then tag, then gc, in that order
 
 
 General notes:

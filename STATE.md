@@ -9,32 +9,66 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-13 (Tasks 1-3 done; Tier 2 bench awaiting submission approval)
+Last updated: 2026-09-13 (Tasks 1-3 done; 12 configs written and validated;
+Tier 2 bench awaiting submission approval)
+
+**Scope is now 8 stores**, not 2: {V3.16, V2.8} x {past, nrt} x {spatial,
+temporal}. See TASKS.md for the approved scope change.
 
 | # | Task | State |
 |---|------|-------|
 | 1 | Set up git repo | **done** |
 | 2 | Build the zarr-building codebase | **done** — both write strategies validated end to end |
-| 3 | Decide the chunking strategy (needs user approval) | **done** — approved by the user 2026-09-13 |
-| 4 | Test the codebase for the spatial build | Tier 0 + Tier 1 **passed**; Tier 2 (batch bench) not run |
-| 5 | Run the spatial build | not started |
-| 6 | Verify the spatial store | not started |
-| 7 | Test the codebase for the temporal build | Tier 0 + Tier 1 **passed**; Tier 2 (batch bench) not run |
-| 8 | Verify the temporal store | not started |
+| 3 | Decide the chunking strategy | **done** — approved 2026-09-13 |
+| 4 | Test the codebase (spatial) | Tier 0 + Tier 1 **passed**; Tier 2 batch bench **not run** |
+| 5 | Run the spatial builds | not started (4 stores) |
+| 6 | Verify the spatial stores | blocked — `verify_mswep_zarr.py` does not exist yet |
+| 7 | Test the codebase (temporal) | Tier 0 + Tier 1 **passed**; Tier 2 batch bench **not run** |
+| 8 | Verify the temporal stores | blocked — `verify_mswep_zarr.py` does not exist yet |
+
+Per-store build status — none built yet:
+
+| store | axis | gaps | strategy | chunk | block |
+|---|---|---|---|---|---|
+| `v_3_16.past.spatial` | 16,982 | 2 | append, 170 commits | (1,1800,3600) 24.7 MiB | — |
+| `v_3_16.past.temporal` | 16,982 | 2 | region, 9 blocks | (16982,20,20) 25.9 MiB | 45.5 GiB |
+| `v_3_16.nrt.spatial` | 684 | 0 | append, 7 commits | (1,1800,3600) 24.7 MiB | — |
+| `v_3_16.nrt.temporal` | 684 | 0 | region, 9 blocks | (684,20,20) 1.0 MiB | 1.8 GiB |
+| `v_2_8.past.spatial` | 15,339 | 0 | append, 154 commits | (1,1800,3600) 24.7 MiB | — |
+| `v_2_8.past.temporal` | 15,339 | 0 | region, 9 blocks | (15339,20,20) 23.4 MiB | 41.1 GiB |
+| `v_2_8.nrt.spatial` | 2,117 | 0 | append, 22 commits | (1,1800,3600) 24.7 MiB | — |
+| `v_2_8.nrt.temporal` | 2,117 | 0 | region, 9 blocks | (2117,20,20) 3.2 MiB | 5.7 GiB |
 
 ## Next action
 
-**Run the Tier 2 bench — two batch jobs, awaiting the user's go-ahead to
-submit.** Configs are written (`config_zarr_bench_spatial.yaml`,
-`config_zarr_bench_temporal.yaml`); each is byte-identical to its production
-counterpart except for the store suffix and the log file. The submit commands
-are in [TESTING.md](TESTING.md). Delete both bench stores once measured.
+**Submit the four Tier 2 bench jobs — awaiting the user's go-ahead.** All 12
+configs (8 production + 4 bench) are written, committed, and validated: every
+one resolves to the intended store name, axis length, gap count, chunking and
+write strategy, and every attribute template renders. Commands are in
+[TESTING.md](TESTING.md).
 
-Then size the production chain from what they measure, and run Task 5.
+Then: size the production chain from the measurements, delete the bench stores,
+build, and write `verify_mswep_zarr.py` (tasks 6 and 8 are blocked on it).
 
 ## Decisions made
 
-- **2026-09-13, undeclared fill sentinel (V3.16):** MSWEP V3.16 declares
+- **2026-09-13, separate Past and NRT stores (scope: 8 stores).** MSWEP
+  publishes each release as two products that are NOT the same estimate: `Past`
+  is gauge-corrected, `NRT` is near-real-time. `Past` ends 2025-06-29 (V3.16)
+  and 2020-12-30 (V2.8), so a Past-only store silently ends years ago. They are
+  kept as **separate stores, not merged**: across V2.8's 34-day overlap they
+  correlate 0.94-0.96 with RMSE ~1.9 mm/day and only ~15% of cells identical, so
+  merging would bury that discontinuity inside one array. Every store carries a
+  `product_caveat` attribute naming which to prefer where they overlap (always
+  Past). Scope is therefore {V3.16, V2.8} x {past, nrt} x {spatial, temporal}.
+
+- **2026-09-13, temporal tile stays 20 x 20 for every store.** Uniform tiling
+  so a point time series is always the same 2 x 2 degree tile and stores are
+  directly comparable. Accepted consequence: the chunk is 25.9 MiB for V3.16
+  Past but only 1.0 MiB for V3.16 NRT and 3.2 MiB for V2.8 NRT, and every
+  temporal store holds ~16,200 chunks regardless of record length.
+
+- **2026-09-13, undeclared fill sentinel (V3.16 Past only):** MSWEP V3.16 declares
   `_FillValue = -9999`, which **never occurs in the data**. The real sentinel is
   `-239976.0` = `-9999 x 24`, the fill summed over the 24 hourly steps a daily
   total is built from, so upstream aggregated without propagating the mask. It
@@ -72,7 +106,7 @@ Then size the production chain from what they measure, and run Task 5.
 ## Open decisions needing the user
 
 None outstanding. The only thing waiting is the user's go-ahead to **submit the
-two Tier 2 bench jobs** (see Next action).
+four Tier 2 bench jobs** (see Next action).
 
 ## Task 3: the approved chunking
 
