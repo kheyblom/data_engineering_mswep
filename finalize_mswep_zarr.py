@@ -86,6 +86,15 @@ VERIFY_SUMMARY_RE = re.compile(
 VERIFY_PHASES_RE = re.compile(r"phases: \[(?P<phases>[^\]]*)\]")
 VERIFY_PASSED = 'store verified'
 
+# The message this script's own attribute commit carries. It is written and
+# matched in one place because build_history has to tell a build commit from a
+# finalization one: counting its own commit as a build would make the commit
+# count and date_created move every time --attrs was re-run, which is exactly
+# what an idempotency check caught.
+ATTRS_MESSAGE = 'add provenance and discovery attributes'
+# icechunk's own first snapshot, which is not a commit anyone made
+INITIAL_MESSAGE = 'Repository initialized'
+
 
 def parse_args():
     """Parse the command line.
@@ -234,9 +243,15 @@ def build_history(repository, settings, evidence, current):
         tuple: The history string, the ISO 8601 UTC creation timestamp, and the
             upstream history to preserve, or None if there is nothing to keep.
     """
-    # ancestry yields newest first; the initial snapshot is the oldest
+    # ancestry yields newest first; the initial snapshot is the oldest.
+    # Finalization commits are excluded: they are not part of the build, and
+    # counting them would move the commit count and date_created on every
+    # re-run of --attrs
     snapshots = list(repository.ancestry(branch=BRANCH))
-    built = [s for s in snapshots if s.message != 'Repository initialized']
+    built = [
+        s for s in snapshots
+        if s.message not in (INITIAL_MESSAGE, ATTRS_MESSAGE)
+    ]
     first, last = built[-1], built[0]
     started = first.written_at.astimezone(datetime.timezone.utc)
     finished = last.written_at.astimezone(datetime.timezone.utc)
@@ -479,7 +494,7 @@ def run_attrs(repository, settings, apply_changes):
     # Group.update_attributes merges but its async twin replaces, and only one
     # of those preserves the upstream attributes
     group.update_attributes(merged)
-    snapshot_id = session.commit('add provenance and discovery attributes')
+    snapshot_id = session.commit(ATTRS_MESSAGE)
     LOG.info(f'committed {snapshot_id}')
     return 0
 
