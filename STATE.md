@@ -31,28 +31,23 @@ Every absent chunk was traced to raw rather than assumed.
 
 ## Next action
 
-**Write `finalize_mswep_zarr.py`** -- the only script that mutates a finished
-store, and the last piece of the pipeline. Model it on
-`data_engineering_gleam/finalize_gleam_zarr.py`: writes nothing without
-`--apply`, one action per invocation, and `--status` first because it reports
-which steps a store still needs.
+**One decision outstanding: whether to run `--gc --apply`.** Everything else is
+done -- all eight stores are built, verified, attributed and tagged.
 
-The write order is load-bearing and must not be improvised:
+Garbage collection would reclaim **3.57 GiB, all of it in
+`v_2_8.past.temporal`** (600 chunks orphaned by a Tier 2 bench block killed
+after writing but before committing). Every other store would reclaim 0.00 GiB;
+their unreachable snapshots and manifests are the fork-per-commit behaviour and
+free no space.
 
-1. `--attrs` -- publish the provenance attributes, including `history`,
-   `date_created`, and the `verification` attribute each store has now earned.
-   No store carries one yet, correctly.
-2. `--tag` -- `<version>-verified-<YYYYMMDD>`. Tags are immutable, so one
-   created before the attributes exist permanently names a store that does not
-   describe itself.
-3. `--gc` -- irreversible. Dry-run first, re-run
-   `verify_mswep_zarr.py --phases structure,sweep` afterwards.
+It is irreversible, and **no second copy of these stores exists** -- scratch is
+not backed up. 3.57 GiB is about 1% of the 315 GB collection, against a rebuild
+cost of ~14 core-hours if anything went wrong. The dry run has been recorded in
+TESTING.md finding 16; the decision is the user's.
 
-What garbage collection will actually reclaim, measured by the verifier's dry
-runs: **3.57 GiB of genuinely orphaned chunks in `v_2_8.past.temporal`** only,
-left by a Tier 2 bench block killed after writing but before committing. Every
-other store has zero unreachable chunks; their unreachable *snapshots* are the
-fork-per-commit behaviour and reclaim essentially nothing.
+If it is run: `--gc --apply` per store, then re-run
+`verify_mswep_zarr.py --phases structure,sweep` against each, which is the gate
+that proves collection did no harm.
 
 ## Decisions made
 

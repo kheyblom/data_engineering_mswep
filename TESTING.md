@@ -483,3 +483,72 @@ verifier was audited against this after the second occurrence.
 not: the job completed with 51 checks and 0 failures, and the speed was the raw
 files being warm in page cache from the build. Read the job's own log before
 concluding anything from `qhist`.
+
+## Finalization (2026-09-14)
+
+`finalize_mswep_zarr.py`, in the required order: `--attrs`, then `--tag`, then
+`--gc`. All eight stores carry their attributes and a tag; garbage collection is
+the only step outstanding, and is held for a decision (see below).
+
+### 14. The verification attribute is derived, not configured
+
+GLEAM carried its `verification` text in the config, hand-written after the
+verifier ran. That works, but it lets a store assert an audit nobody performed:
+nothing connects the sentence to the event.
+
+Here `--attrs` reads this store's own verifier log, and **refuses to write
+anything at all** unless it finds a run that passed *and* covered every default
+phase. `DEFAULT_PHASES` is imported from the verifier rather than restated, so
+the bar cannot drift from what the verifier actually runs.
+
+The partial-run case is the one worth having: a `--phases index` run can pass
+while proving almost nothing, and an early version of the gate accepted it. It
+now reports the partial pass and refuses:
+
+```
+WARNING the last passing run covered only ['index'] and skipped
+        ['samples', 'sentinel', 'structure', 'sweep'];
+        a partial run does not count as verification
+```
+
+### 15. Two idempotency bugs, both caught by re-running the same command
+
+`--attrs` is supposed to be safe to re-run. It was not, twice:
+
+- **It counted its own commit as a build commit.** `build_history` treated every
+  non-initial snapshot as part of the build, so a second run reported
+  "171 append commits" instead of 170 and moved `date_created` from the last
+  build commit to the finalization commit. The attribute commit's message is now
+  a module constant, written and matched in one place, and excluded from the
+  build set.
+- **It overwrote the upstream `history`.** The raw files carry their own
+  (`Created on 2026-01-15 00:56` for V3.16, `2021-02-03 20:47` for V2.8), and
+  replacing it destroyed provenance. It is moved to `source_history` rather than
+  appended to, because appending would grow the string on every run.
+
+Re-running `--attrs --apply` on all eight now reports `already up to date`.
+
+One deliberate exception: the history embeds the git revision, so a **dirty or
+moved working tree does legitimately rewrite it**. That is provenance working
+as intended rather than a bug, and it is why the finalizer should be run from a
+committed tree -- the first apply recorded `0d28cf6-dirty` and had to be redone.
+
+### 16. What garbage collection would actually reclaim
+
+| store | chunks | bytes | other |
+|---|---|---|---|
+| `v_2_8.past.temporal` | **600** | **3.57 GiB** | - |
+| `v_3_16.past.spatial` | 0 | 0.00 GiB | 510 manifests, 170 snapshots, 170 txn logs |
+| `v_2_8.past.spatial` | 0 | 0.00 GiB | 462 manifests, 154 snapshots, 154 txn logs |
+| `v_2_8.nrt.spatial` | 0 | 0.00 GiB | 66 manifests, 22 snapshots, 22 txn logs |
+| `v_3_16.nrt.spatial` | 0 | 0.00 GiB | 21 manifests, 7 snapshots, 7 txn logs |
+| the four temporal NRT/V3.16 stores | 0 | 0.00 GiB | nothing |
+
+Only one store has anything of substance to collect, and it is **3.57 GiB out of
+315 GB -- about 1%**. The snapshots are the fork-per-commit behaviour and
+reclaim no bytes at all.
+
+Against that: collection is irreversible, and **there is no second copy of any
+of these stores.** Scratch is not backed up and the campaign allocation holds
+nothing. Rebuilding would cost roughly 14 core-hours and several hours of
+wall-clock.
