@@ -22,3 +22,4 @@ General notes:
 - it is always important to minimize compute costs on derecho. we have a finite allocation and managing this effective is very important.
 - keep notes on your current working state. you may lose connection to the HPC system or I may need to start new sessions, so I need you to be able to easily pick up where you left off.
 - additional tasks may come up that need to occur between the above tasks. this task list can be flexible, but if substantial changes are need, I need to approve them.
+- mark tasks as completed when they are completed
