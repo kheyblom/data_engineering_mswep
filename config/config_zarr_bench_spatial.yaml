@@ -1,0 +1,150 @@
+# Tier 2 config for the append path: the real raw tree and the real production
+# settings, but a throwaway store under a 'bench_spatial' suffix.
+#
+# It exists because timesteps_per_commit is baked into the time coordinate's
+# chunking when the store is created and CANNOT be changed on a resume. So if
+# the measurement says the commit size is wrong, it has to be wrong somewhere
+# disposable rather than in the store that is being kept.
+#
+# The only differences from config_zarr_spatial.yaml are the suffix and the log
+# file. Run it under a bounded walltime -- the append path writes from timestep
+# 0 in order, so a walltime kill simply stops it and the log gives throughput
+# per commit. Delete the store afterwards.
+directories:
+  download: /glade/derecho/scratch/kheyblom/data/mswep/
+  logs: ./logs
+output_conventions:
+  filename: mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+  suffix: bench_spatial
+log_file: mswep_zarr_bench_spatial.log
+version: V3.16
+# one product per store. The period is carried in the store name as well as the
+# resolution, because MSWEP publishes Past and NRT records that are not the same
+# data and must not resolve to the same filename
+product: Past/Daily
+variables: all
+grid_name: native_0p1x0p1
+
+# Timesteps the upstream release never published. The build writes the complete
+# regularly spaced axis and fills these as NaN, but ONLY if what is absent from
+# the raw tree is exactly this list -- anything else is an incomplete download
+# and the run fails rather than filling it silently. With a single variable
+# there is no cross-variable time-axis check to catch that instead.
+expected_missing_times:
+  - 1993-08-29
+  - 1993-08-31
+
+# Values the source files use as fill but do NOT declare in _FillValue, so the
+# CF decoding leaves them in the data as though they were measurements.
+#
+# MSWEP V3.16 marks a solid 150 x 150 block at the corner of the grid --
+# array indices [0:150, 0:150], i.e. 75.05-89.95 N and 180-165 W, Arctic Ocean
+# near the dateline -- with -239976.0 on every single day of the record. That is
+# the declared _FillValue of -9999 summed over the 24 hourly steps the daily
+# total is built from, so upstream aggregated without propagating the mask.
+# V2.8.0 has no negative values at all, so this is a V3.16 production defect.
+#
+# Declared rather than detected: a rule like 'mask anything negative' would also
+# hide a defect nobody has noticed, while a named value fails loudly if the next
+# release changes it. The build checks each value actually occurs before masking.
+source_fill_values:
+  - -239976.0
+
+# one whole global map per chunk, 24.7 MiB of float32. A map is one chunk; a
+# point time series is the worst case, touching every chunk of the variable
+chunks:
+  time: 1
+  lat: -1
+  lon: -1
+timesteps_per_commit: 100
+num_workers: 4
+file_cache_maxsize: 32
+# NOT the 512 the GLEAM append path needed. There the raw files were chunked 12
+# timesteps deep while the store was written one timestep at a time, so the
+# cache had to hold a whole 12-deep row or HDF5 decompressed each chunk twelve
+# times over -- worth 7.6x end to end. MSWEP files hold one timestep and are
+# chunked [1, 200, 200], so every source chunk is read once whatever the cache
+# holds. 32 MiB covers the 162 chunks of one plane with room to spare. Costs
+# file_cache_maxsize x this much memory in the worst case.
+chunk_cache_size_mib: 32
+
+# Store global attributes. Every string is templated over the same config fields
+# the filename template uses, so {version_label} and friends stay in one place.
+# Coverage and grid attributes are not here: derive_attrs reads them off the
+# data so they cannot drift from what was actually written.
+#
+# 'history', 'date_created' and 'verification' are deliberately absent: they
+# describe a build and an audit that have not happened yet, and are written by
+# finalize_mswep_zarr.py --attrs once they have. A store must not carry a claim
+# it has not earned.
+attrs:
+  title: >-
+    MSWEP {version_label} daily precipitation, native 0.1 degree global grid,
+    1979-2025
+  summary: >-
+    The Multi-Source Weighted-Ensemble Precipitation (MSWEP)
+    {version_label} daily product on its native 0.1 degree global grid, stored
+    as an icechunk-backed zarr store. A single variable, precipitation, merged
+    from one netCDF file per day onto one time/lat/lon grid.
+  # ACDD rather than CF, deliberately: see cf_compliance
+  Conventions: ACDD-1.3
+  cf_compliance: >-
+    Not CF compliant. The variable's units are carried through unaltered from
+    the upstream MSWEP netCDF files, spelled 'mm/d', which udunits does not
+    parse; the upstream files carry no standard_name and no long_name at all.
+    Correcting the units would mean diverging from upstream, so they are left
+    as published and the descriptive names are supplied through variable_attrs
+    instead.
+  source: >-
+    MSWEP {version_label} {period} {temporal_resolution} netCDF files, one file
+    per day, downloaded from the GloH2O Google Drive distribution by
+    access_mswep
+  creator_name: Kyle Heyblom
+  creator_email: heyblom@umich.edu
+  references: >-
+    http://www.gloh2o.org/mswep/ -- Beck et al. (2019), MSWEP V2 global
+    3-hourly 0.1 degree precipitation, Bulletin of the American Meteorological
+    Society 100(3), doi:10.1175/BAMS-D-17-0138.1
+  chunking: >-
+    Chunked (time, lat, lon) = (1, 1800, 3600), float32, zstd: one whole global
+    map per chunk, 24.7 MiB. Built for reading maps and fields. A point time
+    series is the worst case for this layout, touching every chunk of the
+    variable; for that access pattern read the sibling
+    mswep.{version}.{period}.{temporal_resolution}.{grid_name}.temporal.zarr
+    instead, which holds the same data chunked along time.
+  related_store: >-
+    mswep.{version}.{period}.{temporal_resolution}.{grid_name}.temporal.zarr --
+    the same variable on the same grid over the same period, chunked one small
+    tile through the whole record per chunk. Identical values; the two differ
+    only in chunking, and each is built from and verified against the raw files
+    independently rather than derived from the other.
+  known_data_gaps: >-
+    MSWEP {version_label} does not publish 1993-08-29 or 1993-08-31. The store
+    covers the complete daily axis and both days are present and entirely fill
+    (NaN), so the time axis is regularly spaced and a date offset always lands
+    on the date it names. This is a gap in the upstream release, not a
+    conversion defect. Zarr does not write a chunk whose cells are all fill, so
+    the precipitation array holds two fewer chunks than it has timesteps and
+    that is correct.
+    Separately, MSWEP {version_label} never produced a 150 x 150 block at the
+    corner of the grid -- 75.05-89.95 N, 180-165 W -- and marked it -239976.0
+    (the declared _FillValue of -9999 summed over 24 hourly steps) rather than
+    with the declared fill value, on every day of the record. Those cells are
+    masked to NaN here; see the source_fill_values_masked attribute. V2.8.0 does
+    have data over that block.
+
+# Attributes to put on the data variables themselves. MSWEP's files carry only
+# 'units' and 'least_significant_digit', with no long_name and no standard_name,
+# so unlike GLEAM there is a real gap here rather than upstream metadata to
+# preserve. Anything set here goes on top of what the files carry; 'units' is
+# deliberately not overridden, so the upstream spelling survives.
+variable_attrs:
+  precipitation:
+    long_name: Precipitation
+    # a genuine CF standard name, unlike the units; the quantity is a flux even
+    # though it is published in mm/d rather than the canonical kg m-2 s-1
+    standard_name: precipitation_flux
+    comment: >-
+      Daily total precipitation. Values are quantised upstream -- see the
+      least_significant_digit attribute carried over from the source files --
+      so not all of the float32 precision is meaningful.

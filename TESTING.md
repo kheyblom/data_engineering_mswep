@@ -174,3 +174,45 @@ larger in production than in the fixture. Tier 2 has to confirm both.
   proving it record-wide is a full-coverage question and belongs to the verifier.
 - Peak memory on the region path at the production block size (45.5 GiB
   resident, against 1.05 GiB in the fixture).
+
+## Tier 2: the bench jobs
+
+Approved 2026-09-13. Two jobs, each against the real raw tree with the real
+production settings, writing a **throwaway** store. Both configs differ from
+their production counterparts only in `output_conventions.suffix` and
+`log_file`.
+
+```bash
+# append path. ~1 GB resident is the expectation (4 workers x 24.7 MiB chunks
+# plus 32 files x 32 MiB of chunk cache), so 16 GB is already generous.
+QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=02:00:00 \
+    CONFIG=config/config_zarr_bench_spatial.yaml ./submit_mswep_zarr.sh
+
+# region path. One block is held whole, so this needs memory rather than cpus:
+# GLEAM's equivalent 45.1 GiB block measured 70-80 GB resident at NCPUS=1, and
+# a shared develop job gets a flat 10 GB default whatever ncpus it asks for.
+QUEUE=develop NCPUS=1 MEM=96GB WALLTIME=03:00:00 \
+    CONFIG=config/config_zarr_bench_temporal.yaml ./submit_mswep_zarr.sh
+```
+
+Neither needs to finish. The append path writes from timestep 0 in order, so a
+walltime kill just stops it and the per-commit log lines give throughput; the
+region path only needs one or two committed blocks to show peak memory and
+per-block wall time.
+
+What to read off them:
+
+| | from the append bench | from the region bench |
+|---|---|---|
+| cold open | first log gap, before the first commit | same |
+| throughput | seconds per 100 step commit | seconds per block |
+| peak memory | `qhist` Mem column | `qhist` Mem column, against the 45.5 GiB block |
+| compression | store bytes / timesteps written | store bytes / blocks written |
+| cpu efficiency | `qhist` CPU vs Elapsed x NCPUs | same |
+
+Then: delete both bench stores, size the production chain, and run Task 5.
+
+```bash
+rm -rf /glade/derecho/scratch/$USER/data/mswep/v_3_16/zarr/*.bench_spatial.zarr
+rm -rf /glade/derecho/scratch/$USER/data/mswep/v_3_16/zarr/*.bench_temporal.zarr
+```
