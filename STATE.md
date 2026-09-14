@@ -41,14 +41,35 @@ Per-store build status — none built yet:
 
 ## Next action
 
-**Submit the four Tier 2 bench jobs — awaiting the user's go-ahead.** All 12
-configs (8 production + 4 bench) are written, committed, and validated: every
-one resolves to the intended store name, axis length, gap count, chunking and
-write strategy, and every attribute template renders. Commands are in
-[TESTING.md](TESTING.md).
+**Waiting for two unrelated `gleam_split` jobs to finish, then submitting the
+four Tier 2 bench jobs.** The user approved submission on 2026-09-13 with the
+condition "wait for the gleam jobs and then submit".
 
-Then: size the production chain from the measurements, delete the bench stores,
-build, and write `verify_mswep_zarr.py` (tasks 6 and 8 are blocked on it).
+Why wait: those jobs hold 28 cpus and 264 GB on `cpudev` and are doing heavy
+rechunking I/O against GLADE. The bench exists to measure throughput and
+cold-open cost, and measuring through that contention would give pessimistic,
+noisy numbers that the production chain would then be sized from.
+
+**If this session died before the jobs were submitted**, check whether the
+gleam jobs are gone (`qstat -u $USER | grep gleam`) and, once they are, submit:
+
+```bash
+QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=02:00:00 \
+    CONFIG=config/config_zarr_bench_v3_16_past_spatial.yaml ./submit_mswep_zarr.sh
+QUEUE=develop NCPUS=1 MEM=96GB WALLTIME=03:00:00 \
+    CONFIG=config/config_zarr_bench_v3_16_past_temporal.yaml ./submit_mswep_zarr.sh
+QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=02:00:00 \
+    CONFIG=config/config_zarr_bench_v2_8_past_spatial.yaml ./submit_mswep_zarr.sh
+QUEUE=develop NCPUS=1 MEM=96GB WALLTIME=03:00:00 \
+    CONFIG=config/config_zarr_bench_v2_8_past_temporal.yaml ./submit_mswep_zarr.sh
+```
+
+~22 core-hours if all four run to walltime; none needs to finish. Then read
+throughput and peak memory off the logs and `qhist`, size the production chain,
+delete the four bench stores, and build. See [TESTING.md](TESTING.md).
+
+All 12 configs are written, committed and validated (commit 202e7b3) -- nothing
+else is outstanding before the bench.
 
 ## Decisions made
 
