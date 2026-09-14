@@ -255,3 +255,80 @@ attribute template renders with no unsubstituted braces.
 
 Passed 2026-09-13 for all 12 configs. The exact script is in the approved plan
 and is cheap to re-run after any config edit.
+
+## Tier 2 outcome (2026-09-13/14, jobs 7439058/61/62/63)
+
+Four jobs on `cpudev`, all against the real raw trees writing throwaway
+`bench_*` stores. ~11 core-hours spent.
+
+| | V3.16 Past | V2.8 Past |
+|---|---|---|
+| **append** (4 cpu, 16 GB, 2 h cap) | **completed in 1.13 h** | **completed in 1.16 h** |
+| cold open | 13.2 min | 11.5 min |
+| per 100-step commit | 19.4 s | 22.7 s |
+| commits | 170 | 154 |
+| store size | 87 GB | 53 GB |
+| **region** (1 cpu, 96 GB, 3 h cap) | 5 of 9 blocks, walltime | 4 of 9 blocks, walltime |
+| cold open | 19.6 min | 16.4 min |
+| mean per block | 31.8 min | 36.6 min |
+| block size | 45.5 GiB | 41.1 GiB |
+| projected full build | ~5.1 h | ~5.8 h |
+
+### 5. The append path is far cheaper than expected, and both stores completed
+
+Neither append job needed its 2 h cap: the whole 16,982 step V3.16 record was
+written in **1.13 h** and the 15,339 step V2.8 record in **1.16 h**, at 4 cpus.
+That is ~4.6 core-hours per spatial store.
+
+Both stores were then verified: correct shape, dtype and chunking, a regular
+axis of the right length, coordinates single-chunked, the two 1993 gap days
+all-NaN in V3.16, and values **bit-exact against the raw netCDF** on days
+sampled across the whole record (1979, 1993, 2010, 2025 for V3.16; 1979, 2000,
+2020 for V2.8). V2.8 has zero NaN cells, confirming the corner defect is V3.16
+Past only.
+
+### 6. `[1, 32, 32]` costs far less than the chunk count suggests
+
+V2.8 touches ~40x more source chunks per timestep than V3.16 (6,441 vs 162), and
+~44x more per region block read (~791 vs 18). The predicted penalty was large.
+Measured, it is **17% on the append path** (22.7 vs 19.4 s per commit) and
+**15% on the region path** (36.6 vs 31.8 min per block).
+
+The reason is that both paths read *contiguously*: an append reads a whole
+plane and a region block reads a full-lon hyperslab, so HDF5 walks many small
+adjacent chunks rather than seeking between scattered ones. Chunk **count** is
+a poor proxy for cost when the access pattern is sequential; chunk **locality**
+is what matters, which is the same lesson `block_shape.lon: -1` encodes.
+
+The V2.8 bench was still worth running — a 15-17% penalty is a real number to
+size a chain from, and it could not have been predicted from the chunk counts.
+
+### 7. A region build does not fit one develop-queue walltime
+
+At 31.8 and 36.6 min per block plus a ~20 min cold open, a full 9-block region
+build projects to **5.1 h (V3.16)** and **5.8 h (V2.8)**. The develop queue caps
+at 6 h, so a single job would be racing its own walltime with no margin.
+
+Chain two jobs with `AFTER=<jobid>` instead. Resume is proven and cheap: the
+second job re-reads the commit messages, skips the finished blocks, and pays
+only the ~20 min cold open again.
+
+Block times are **not** uniform — V3.16 ran 11.9, 28.5, 36.6, 44.9, 37.0 min for
+blocks 1-5. Block 1 is the Arctic band containing the all-NaN corner and
+compresses away quickly; the mid-latitude bands are the expensive ones. Do not
+size a chain from the first block.
+
+### 8. xarray warns once per file about the V2.8 misalignment
+
+The V2.8 region job produced a **4.5 MB** PBS output file, 15,339 copies of:
+
+```
+UserWarning: The specified chunks separate the stored chunks along dimension
+"lat" starting at index 200. This could degrade performance.
+```
+
+One per opened file. It is correct — a 200 row read chunk does straddle the
+32 row source chunks — and it is a documented, accepted trade (no block size can
+align with a 32 row grid, since 1800/32 = 56.25). But at one warning per file it
+buries the job log. Worth suppressing for this known case rather than leaving
+every V2.8 job output at 4.5 MB.

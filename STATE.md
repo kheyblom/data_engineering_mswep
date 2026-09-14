@@ -41,35 +41,23 @@ Per-store build status — none built yet:
 
 ## Next action
 
-**Waiting for two unrelated `gleam_split` jobs to finish, then submitting the
-four Tier 2 bench jobs.** The user approved submission on 2026-09-13 with the
-condition "wait for the gleam jobs and then submit".
+**Tier 2 is done (2026-09-13/14, ~11 core-hours). Two decisions are waiting on
+the user before the production builds start** — see "Open decisions" below.
 
-Why wait: those jobs hold 28 cpus and 264 GB on `cpudev` and are doing heavy
-rechunking I/O against GLADE. The bench exists to measure throughput and
-cold-open cost, and measuring through that contention would give pessimistic,
-noisy numbers that the production chain would then be sized from.
+Results in full in [TESTING.md](TESTING.md). The headlines:
 
-**If this session died before the jobs were submitted**, check whether the
-gleam jobs are gone (`qstat -u $USER | grep gleam`) and, once they are, submit:
+- **Both append benches ran to completion** and their stores verified
+  bit-exact against raw. V3.16 Past took 1.13 h and V2.8 Past 1.16 h at 4 cpus
+  (~4.6 core-hours each). They are, in every respect except their name,
+  finished production spatial stores.
+- **Both region benches hit their 3 h walltime**, at 5 of 9 and 4 of 9 blocks.
+  A full region build projects to ~5.1 h (V3.16) and ~5.8 h (V2.8), which does
+  not safely fit the 6 h develop cap — chain two jobs with `AFTER=<jobid>`.
+- **V2.8's `[1,32,32]` chunking costs only 15-17%**, not the ~40x the chunk
+  counts implied, because both read paths are sequential.
 
-```bash
-QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=02:00:00 \
-    CONFIG=config/config_zarr_bench_v3_16_past_spatial.yaml ./submit_mswep_zarr.sh
-QUEUE=develop NCPUS=1 MEM=96GB WALLTIME=03:00:00 \
-    CONFIG=config/config_zarr_bench_v3_16_past_temporal.yaml ./submit_mswep_zarr.sh
-QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=02:00:00 \
-    CONFIG=config/config_zarr_bench_v2_8_past_spatial.yaml ./submit_mswep_zarr.sh
-QUEUE=develop NCPUS=1 MEM=96GB WALLTIME=03:00:00 \
-    CONFIG=config/config_zarr_bench_v2_8_past_temporal.yaml ./submit_mswep_zarr.sh
-```
-
-~22 core-hours if all four run to walltime; none needs to finish. Then read
-throughput and peak memory off the logs and `qhist`, size the production chain,
-delete the four bench stores, and build. See [TESTING.md](TESTING.md).
-
-All 12 configs are written, committed and validated (commit 202e7b3) -- nothing
-else is outstanding before the bench.
+Once those decisions are made: build the remaining stores, then write
+`verify_mswep_zarr.py` (tasks 6 and 8 are blocked on it).
 
 ## Decisions made
 
@@ -126,8 +114,18 @@ else is outstanding before the bench.
 
 ## Open decisions needing the user
 
-None outstanding. The only thing waiting is the user's go-ahead to **submit the
-four Tier 2 bench jobs** (see Next action).
+1. **Promote the two completed append bench stores to production, or rebuild?**
+   `bench_spatial` for V3.16 Past and V2.8 Past are complete and verified
+   bit-exact. Renaming a store directory is safe (tested: an icechunk store
+   opens fine at a new path with commits and attrs intact), and their attributes
+   already name the *production* siblings, since the templates hard-code
+   `spatial`/`temporal` rather than the suffix. Promoting saves **~9 core-hours
+   and ~2.3 h of wall time**; rebuilding is the plan as written and keeps the
+   "bench stores are throwaway" rule clean.
+
+2. **Region build chaining.** A full region build needs ~5.1-5.8 h against a 6 h
+   develop cap. Recommend two chained 6 h jobs per store
+   (`AFTER=<jobid>`), rather than one job racing its walltime.
 
 ## Task 3: the approved chunking
 
