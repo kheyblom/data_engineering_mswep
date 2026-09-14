@@ -121,6 +121,11 @@ DEFAULT_PHASES = tuple(p for p in PHASES if p != 'metadata')
 PRECIPITATION_FLOOR = 0.0
 PRECIPITATION_CEILING = 2000.0
 
+# Tiles per axis sampled when confirming a gap timestep is all-NaN on the
+# temporal layout. Reading the whole plane there would touch every chunk of the
+# variable; a lattice this size is a few hundred MiB and still spans the globe.
+GAP_TILE_LATTICE = 6
+
 # A written chunk smaller than this is suspicious on the spatial layout, where
 # every chunk is a whole global plane and cannot legitimately compress to
 # nothing. On the temporal layout a tile really can be almost empty, so no floor
@@ -609,7 +614,7 @@ def check_repository(report, repository, dataset, settings, chunks, layout):
     )
 
 
-def check_index(report, dataset, index, settings):
+def check_index(report, dataset, index, settings, chunks, layout):
     """Check the time axis and the spatial coordinates against raw.
 
     Args:
@@ -617,6 +622,8 @@ def check_index(report, dataset, index, settings):
         dataset (xarray.Dataset): The decoded store.
         index (dict): The raw index.
         settings (dict): The loaded configuration.
+        chunks (dict): Resolved chunk sizes.
+        layout (str): From ``store_layout``.
     """
     stored = dataset.indexes['time']
     expected = index['expected']
@@ -654,22 +661,51 @@ def check_index(report, dataset, index, settings):
         )
     raw.close()
 
-    # every timestep the release never published must be present and all-NaN
+    # Every timestep the release never published must be present and all-NaN.
+    #
+    # How much of the plane can be looked at depends on the layout, and getting
+    # this wrong is expensive rather than merely slow: on the temporal layout a
+    # whole plane touches every chunk of the variable -- 86 GiB for one map of
+    # V3.16 Past -- so it is sampled on a coarse lattice of tiles instead, each
+    # of which is one chunk. On the spatial layout a plane *is* one chunk, so it
+    # is read whole and the check is exact.
     variable = sorted(dataset.data_vars)[0]
-    if index['missing']:
-        bad = []
-        for position in index['missing']:
-            plane = dataset[variable].isel(time=position).values
-            if not bool(np.isnan(plane).all()):
-                bad.append(str(stored[position].date()))
-        report.check(
-            f'the {len(index["missing"])} timesteps with no raw file are all-NaN',
-            not bad,
-            f'not all-NaN at {bad}' if bad else
-            ', '.join(str(stored[p].date()) for p in index['missing']),
-        )
-    else:
+    if not index['missing']:
         report.note('no timestep is missing from raw; the record is complete')
+        return
+
+    if layout == 'spatial':
+        regions = [(slice(None), slice(None))]
+        scope = 'the whole plane'
+    else:
+        grid = tile_grid(chunks, dataset.sizes)
+        step_i = max(1, grid[0] // GAP_TILE_LATTICE)
+        step_j = max(1, grid[1] // GAP_TILE_LATTICE)
+        regions = [
+            (
+                slice(i * chunks['lat'], (i + 1) * chunks['lat']),
+                slice(j * chunks['lon'], (j + 1) * chunks['lon']),
+            )
+            for i in range(0, grid[0], step_i)
+            for j in range(0, grid[1], step_j)
+        ]
+        scope = f'{len(regions)} tiles spread over the grid'
+
+    bad = []
+    for position in index['missing']:
+        for lat, lon in regions:
+            block = dataset[variable].isel(time=position, lat=lat, lon=lon).values
+            if not bool(np.isnan(block).all()):
+                bad.append(str(stored[position].date()))
+                break
+    report.check(
+        f'the {len(index["missing"])} timesteps with no raw file are all-NaN '
+        f'({scope})',
+        not bad,
+        f'not all-NaN at {bad}'
+        if bad
+        else ', '.join(str(stored[p].date()) for p in index['missing']),
+    )
 
 
 def sample_boxes(dataset, chunks, layout, args, rng):
@@ -1169,7 +1205,7 @@ def main(settings, args):
         check_repository(report, repository, dataset, settings, chunks, layout)
     if 'index' in phases:
         LOG.info('--- index')
-        check_index(report, dataset, index, settings)
+        check_index(report, dataset, index, settings, chunks, layout)
     if 'samples' in phases:
         LOG.info('--- samples')
         check_samples(report, dataset, index, args, chunks, layout, sentinels)
