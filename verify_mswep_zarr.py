@@ -921,18 +921,27 @@ async def check_sweep(report, session, dataset, index, chunks, layout, args, sen
         )
 
 
-def check_sentinel(report, dataset, index, args, sentinels, settings):
+def check_sentinel(report, dataset, index, args, sentinels, settings, chunks, layout):
     """Check that no undeclared fill sentinel survived into the store.
 
     The build only looks at the first timestep, deliberately -- proving a value
-    occurs nowhere else is a full-coverage question and belongs here. It is still
-    not free: every plane is 24.7 MiB, so this samples rather than reads the
-    record. What it samples it settles exactly.
+    occurs nowhere else is a full-coverage question and belongs here. It is not
+    free, so this samples rather than reads the record, and what it samples it
+    settles exactly.
 
-    Two directions are checked. From raw: any negative value on a sampled plane
-    must be a sentinel the config declares, or the config is incomplete. From the
-    store: no value below the physical floor may survive, which is what an
-    undeclared sentinel would look like after masking.
+    Two directions are checked, and they cost very differently:
+
+    **From raw**, any negative value on a sampled plane must be a sentinel the
+    config declares, or the config is incomplete. One raw plane is one file, so
+    this is cheap whatever the store's layout is. This is the direction that
+    would catch a release changing its sentinel.
+
+    **From the store**, no value below the physical floor may survive, which is
+    what an undeclared sentinel would look like after masking. This one *must*
+    follow the store's chunking. Reading a whole plane out of a temporal store
+    touches every chunk of the variable -- 86 GiB for one map of V3.16 Past --
+    so the unit here is a plane on the spatial layout and a tile through the
+    record on the temporal one. Both are exactly one chunk.
 
     Args:
         report (Report): Where to record outcomes.
@@ -941,77 +950,132 @@ def check_sentinel(report, dataset, index, args, sentinels, settings):
         args (argparse.Namespace): Parsed arguments.
         sentinels (list): Values the raw files use as fill.
         settings (dict): The loaded configuration.
+        chunks (dict): Resolved chunk sizes.
+        layout (str): From ``store_layout``.
     """
     variable = sorted(dataset.data_vars)[0]
-    n_time = dataset.sizes['time']
+    sizes = dataset.sizes
+    n_time = sizes['time']
     dates = dataset['time'].values
+    missing = set(index['missing'])
+
+    # --- from raw: one file per plane, cheap on either layout
     planes = sorted(
         set(int(x) for x in np.linspace(0, n_time - 1, args.sentinel_planes).round())
     )
     planes = [t for t in planes if index['paths'][t] is not None]
-
     undeclared = {}
-    store_low = []
-    store_high = []
-    masked_counts = set()
     for timestep in planes:
         raw = read_raw_box(index, variable, timestep, timestep + 1)[0]
-        negative = np.unique(raw[raw < PRECIPITATION_FLOOR])
-        for value in negative:
-            if not any(value == s for s in sentinels):
-                undeclared.setdefault(float(value), []).append(str(dates[timestep])[:10])
-
-        stored = dataset[variable].isel(time=timestep).values
-        finite = stored[np.isfinite(stored)]
-        if finite.size and finite.min() < PRECIPITATION_FLOOR:
-            store_low.append((str(dates[timestep])[:10], float(finite.min())))
-        if finite.size and finite.max() > PRECIPITATION_CEILING:
-            store_high.append((str(dates[timestep])[:10], float(finite.max())))
-        masked_counts.add(int(np.isnan(stored).sum()))
-
+        for value in np.unique(raw[raw < PRECIPITATION_FLOOR]):
+            if not any(value == sentinel for sentinel in sentinels):
+                undeclared.setdefault(float(value), []).append(
+                    str(dates[timestep])[:10]
+                )
     report.check(
-        f'every negative raw value on {len(planes)} sampled planes is a declared '
-        f'sentinel',
+        f'every negative raw value on {len(planes)} sampled planes is a '
+        f'declared sentinel',
         not undeclared,
-        f'declared {[float(s) for s in sentinels]}'
+        f'declared {[float(x) for x in sentinels]}'
         if not undeclared
         else f'UNDECLARED {dict(list(undeclared.items())[:3])}',
     )
-    report.check(
-        f'no stored value is below {PRECIPITATION_FLOOR} mm/day on those planes',
-        not store_low,
-        'all finite values are non-negative'
-        if not store_low
-        else f'NEGATIVE at {store_low[:5]}',
-    )
-    if store_high:
+
+    # --- from the store: read one chunk at a time, in the layout's own unit
+    rng = np.random.default_rng(args.seed)
+    if layout == 'spatial':
+        units = [
+            (timestep, timestep + 1, slice(None), slice(None)) for timestep in planes
+        ]
+        unit_name = 'plane'
+    else:
+        grid = tile_grid(chunks, sizes)
+        # the origin tile first: on V3.16 Past it sits inside the corner block,
+        # so it is the one that must be entirely masked
+        picks = [(0, 0)]
+        picks += [
+            (int(rng.integers(grid[0])), int(rng.integers(grid[1])))
+            for _ in range(max(0, args.sentinel_planes // 4))
+        ]
+        units = [
+            (
+                0,
+                n_time,
+                slice(i * chunks['lat'], (i + 1) * chunks['lat']),
+                slice(j * chunks['lon'], (j + 1) * chunks['lon']),
+            )
+            for i, j in picks
+        ]
+        unit_name = 'tile'
         report.note(
-            f'{len(store_high)} sampled plane(s) exceed {PRECIPITATION_CEILING} '
-            f'mm/day: {store_high[:5]} -- above the world daily rainfall record, '
-            f'worth a look, not automatically wrong for a gridded product'
+            f'reading {len(units)} whole-record tiles from the store rather than '
+            f'planes; one plane out of this layout would touch all '
+            f'{grid[0] * grid[1]} chunks'
+        )
+
+    low, high, footprints, moving = [], [], set(), []
+    for t0, t1, lat, lon in units:
+        stored = dataset[variable].isel(time=slice(t0, t1), lat=lat, lon=lon).values
+        finite = stored[np.isfinite(stored)]
+        where = f'{str(dates[t0])[:10]}' if layout == 'spatial' else \
+                f'lat[{lat.start}:{lat.stop}) lon[{lon.start}:{lon.stop})'
+        if finite.size and float(finite.min()) < PRECIPITATION_FLOOR:
+            low.append((where, float(finite.min())))
+        if finite.size and float(finite.max()) > PRECIPITATION_CEILING:
+            high.append((where, float(finite.max())))
+
+        if layout == 'spatial':
+            footprints.add(int(np.isnan(stored).sum()))
+        else:
+            # a tile's masked footprint must not move through the record. The
+            # timesteps the release never published are all-NaN everywhere and
+            # would otherwise look like a moving footprint, so they are excluded
+            masks = {
+                np.isnan(stored[k]).tobytes()
+                for k in range(stored.shape[0])
+                if (t0 + k) not in missing
+            }
+            if len(masks) > 1:
+                moving.append(where)
+            footprints.add(int(np.isnan(stored[0]).sum()) if 0 not in missing else -1)
+
+    report.check(
+        f'no stored value is below {PRECIPITATION_FLOOR} mm/day across '
+        f'{len(units)} {unit_name}s',
+        not low,
+        'every finite value is non-negative' if not low else f'NEGATIVE at {low[:5]}',
+    )
+    if high:
+        report.note(
+            f'{len(high)} {unit_name}(s) exceed {PRECIPITATION_CEILING} mm/day: '
+            f'{high[:5]} -- above the world daily rainfall record, worth a look '
+            f'rather than automatically wrong for a gridded product'
         )
     else:
-        report.note(f'no sampled plane exceeds {PRECIPITATION_CEILING} mm/day')
+        report.note(f'no sampled {unit_name} exceeds {PRECIPITATION_CEILING} mm/day')
 
-    # the masked footprint should be constant if it is a fixed upstream block,
-    # which is what the V3.16 corner is; a moving one would mean something else
-    declared = settings.get('source_fill_values') or []
-    if declared:
+    if layout == 'temporal':
+        report.check(
+            f'each sampled tile has the same masked footprint at every '
+            f'published timestep',
+            not moving,
+            'the mask does not move through the record'
+            if not moving
+            else f'MOVING at {moving[:5]}',
+        )
+    else:
+        declared = settings.get('source_fill_values') or []
         report.check(
             'the masked footprint is the same on every sampled plane',
-            len(masked_counts) == 1,
-            f'{sorted(masked_counts)[:5]} NaN cells per plane',
+            len(footprints) == 1,
+            f'{sorted(footprints)[:5]} NaN cells per plane',
         )
-        report.note(
-            f'masking {sorted(masked_counts)[0]} cells per plane '
-            f'({sorted(masked_counts)[0] / (1800 * 3600) * 100:.3f}% of the grid)'
-        )
-    else:
-        report.check(
-            'no cells are masked, as the config declares no sentinel',
-            masked_counts == {0},
-            f'{sorted(masked_counts)[:5]} NaN cells per plane',
-        )
+        if declared:
+            report.note(
+                f'masking {sorted(footprints)[0]} cells per plane '
+                f'({sorted(footprints)[0] / (sizes["lat"] * sizes["lon"]) * 100:.3f}%'
+                f' of the grid)'
+            )
 
 
 def check_metadata(report, dataset, other_settings):
@@ -1116,7 +1180,9 @@ def main(settings, args):
         )
     if 'sentinel' in phases:
         LOG.info('--- sentinel')
-        check_sentinel(report, dataset, index, args, sentinels, settings)
+        check_sentinel(
+            report, dataset, index, args, sentinels, settings, chunks, layout
+        )
     if 'metadata' in phases:
         LOG.info('--- metadata')
         check_metadata(report, dataset, load_config(args.compare_with))
