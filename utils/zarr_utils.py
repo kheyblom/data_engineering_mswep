@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 
 import dask
 from dask.system import CPU_COUNT
@@ -219,8 +220,53 @@ def commit_batch_size(chunks, settings):
     return n_chunks * time_chunk
 
 
+# xarray warns once per file when the read chunks do not line up with the
+# chunking inside the file. For MSWEP v2.8 that is every file and it is expected
+# -- those files are chunked [1, 32, 32] and 1800/32 = 56.25, so the source grid
+# does not tile the lat axis evenly and NO block size can align with it. At one
+# warning per file it produced a 4.5 MB job log for 15,339 files, which buries
+# everything else. The warning is collapsed into a single summary line rather
+# than silenced, so the information survives without the flood.
+STRADDLE_WARNING = 'separate the stored chunks'
+
+
 def open_files(files, chunks):
     """Open the raw files as a single lazy dataset concatenated along time.
+
+    Args:
+        files (Sequence): Paths to the netCDF files, in time order.
+        chunks (dict): Chunk sizes to open with, naming every dimension.
+
+    Returns:
+        xarray.Dataset: The files concatenated along time, dask backed.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        # 'always' rather than the default filter, so every occurrence is
+        # captured and can be counted instead of being deduplicated by module
+        warnings.simplefilter('always')
+        dataset = _open_mfdataset(files, chunks)
+
+    # re-emit anything that is not the known chunk-straddle warning, so this
+    # cannot quietly swallow a warning that actually matters
+    straddle = 0
+    for entry in caught:
+        if STRADDLE_WARNING in str(entry.message):
+            straddle += 1
+        else:
+            warnings.warn_explicit(
+                entry.message, entry.category, entry.filename, entry.lineno
+            )
+    if straddle:
+        LOG.info(
+            f'{straddle} of {len(files)} files are chunked so that the read '
+            f'chunks straddle them; expected for this product, and the reads '
+            f'are contiguous either way'
+        )
+    return dataset
+
+
+def _open_mfdataset(files, chunks):
+    """The bare ``open_mfdataset`` call, split out so it can be wrapped.
 
     Args:
         files (Sequence): Paths to the netCDF files, in time order.

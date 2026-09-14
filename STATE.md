@@ -41,23 +41,25 @@ Per-store build status — none built yet:
 
 ## Next action
 
-**Tier 2 is done (2026-09-13/14, ~11 core-hours). Two decisions are waiting on
-the user before the production builds start** — see "Open decisions" below.
+**Building the remaining stores.** The four Tier 2 bench stores were promoted to
+production names rather than thrown away (approved 2026-09-13) -- renaming an
+icechunk store is safe, verified on a throwaway copy first.
 
-Results in full in [TESTING.md](TESTING.md). The headlines:
+Store status after promotion:
 
-- **Both append benches ran to completion** and their stores verified
-  bit-exact against raw. V3.16 Past took 1.13 h and V2.8 Past 1.16 h at 4 cpus
-  (~4.6 core-hours each). They are, in every respect except their name,
-  finished production spatial stores.
-- **Both region benches hit their 3 h walltime**, at 5 of 9 and 4 of 9 blocks.
-  A full region build projects to ~5.1 h (V3.16) and ~5.8 h (V2.8), which does
-  not safely fit the 6 h develop cap — chain two jobs with `AFTER=<jobid>`.
-- **V2.8's `[1,32,32]` chunking costs only 15-17%**, not the ~40x the chunk
-  counts implied, because both read paths are sequential.
+| store | state |
+|---|---|
+| `v_3_16.past.spatial` | **complete**, 16,982 steps, verified bit-exact |
+| `v_2_8.past.spatial` | **complete**, 15,339 steps, verified bit-exact |
+| `v_3_16.past.temporal` | 5 of 9 blocks; remaining lat[1000:1800) |
+| `v_2_8.past.temporal` | 4 of 9 blocks; remaining lat[800:1800) |
+| the four `nrt` stores | not started |
 
-Once those decisions are made: build the remaining stores, then write
-`verify_mswep_zarr.py` (tasks 6 and 8 are blocked on it).
+Promoting saved ~9 core-hours on the two finished spatial stores and ~5 more by
+resuming the two partial region stores instead of restarting them.
+
+Then: write `verify_mswep_zarr.py` (tasks 6 and 8 are blocked on it) and
+`finalize_mswep_zarr.py`.
 
 ## Decisions made
 
@@ -114,7 +116,8 @@ Once those decisions are made: build the remaining stores, then write
 
 ## Open decisions needing the user
 
-1. **Promote the two completed append bench stores to production, or rebuild?**
+1. ~~Promote the bench stores?~~ **Decided 2026-09-13: promoted.** Original
+   question kept for the reasoning:
    `bench_spatial` for V3.16 Past and V2.8 Past are complete and verified
    bit-exact. Renaming a store directory is safe (tested: an icechunk store
    opens fine at a new path with commits and attrs intact), and their attributes
@@ -123,9 +126,10 @@ Once those decisions are made: build the remaining stores, then write
    and ~2.3 h of wall time**; rebuilding is the plan as written and keeps the
    "bench stores are throwaway" rule clean.
 
-2. **Region build chaining.** A full region build needs ~5.1-5.8 h against a 6 h
-   develop cap. Recommend two chained 6 h jobs per store
-   (`AFTER=<jobid>`), rather than one job racing its walltime.
+2. ~~Region build chaining?~~ **Decided 2026-09-13: chain two 6 h develop jobs
+   per region store** with `AFTER=<jobid>`. The second is cheap insurance -- if
+   the first finishes, the second pays only the ~20 min cold open before finding
+   the store complete and exiting.
 
 ## Task 3: the approved chunking
 
