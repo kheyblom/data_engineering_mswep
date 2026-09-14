@@ -49,8 +49,16 @@ Then size the production chain from what they measure, and run Task 5.
   `source_fill_values_masked` attribute. Consequence for the temporal store: the
   7 x 7 = 49 tiles lying entirely inside that block are NaN across the whole
   record, so it should hold 16151 chunks rather than 16200.
-  **Open to revisit:** V2.8.0 does have data over that block, so backfilling it
-  is possible at the cost of mixing two releases in one store.
+  **Verified upstream 2026-09-13** by reading the raw netCDF with `ncks` (no
+  Python/xarray/decoding) and by re-downloading a file fresh from the GloH2O
+  Drive, which came back byte-identical (md5 `e7e089885ee84e53f3c32404f85a4a32`)
+  and holds the same values. The defect is in GloH2O's published product.
+  **Confirmed by the user 2026-09-13 after that verification: keep masking to
+  NaN.** Storing the raw `-239976` exactly was considered and rejected -- it is
+  `-9999 x 24`, not a measurement, so it would silently destroy any spatial
+  aggregate touching the Arctic corner. Backfilling from V2.8.0 was also
+  rejected: it correlates only 0.63-0.89 with V3.16 next to the hole, runs
+  1.5-3x wetter, and ends in 2020 so it could not cover ~1,642 days anyway.
 
 - **2026-09-13, time axis:** the stores are **reindexed onto the regular
   16,982-step daily axis** (1979-01-01..2025-06-29), with the two days V3.16 is
@@ -63,9 +71,8 @@ Then size the production chain from what they measure, and run Task 5.
 
 ## Open decisions needing the user
 
-1. **Whether to backfill the 150 x 150 corner block from V2.8.0** (see the fill
-   sentinel decision above). Currently masked to NaN. V2.8.0 has real data there,
-   but using it mixes two releases in one store.
+None outstanding. The only thing waiting is the user's go-ahead to **submit the
+two Tier 2 bench jobs** (see Next action).
 
 ## Task 3: the approved chunking
 

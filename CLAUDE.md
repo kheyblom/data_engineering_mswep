@@ -113,6 +113,37 @@ spatial store is unaffected — every plane still has data outside the corner.
 Whether any *other* cell carries the sentinel is a full-coverage question and
 belongs to the verifier, not the build, which only checks the first timestep.
 
+**Verified upstream, 2026-09-13, three independent ways** — do not re-litigate
+this without new evidence:
+
+1. `ncks` (NCO's C binary) reading the downloaded netCDF directly, with no
+   Python, no xarray and no CF decoding, returns `-239976` at `[0:150, 0:150]`
+   and `0` at index 150 in both lat and lon. The boundary is exact.
+2. `2005100.nc` was re-downloaded fresh from the GloH2O Drive and is
+   **byte-identical** to the stored copy (md5
+   `e7e089885ee84e53f3c32404f85a4a32`); reading that fresh file shows the same
+   values. So the defect is in GloH2O's published product, not in the transfer.
+3. V2.8.0 holds ordinary values at the identical cells (1.3125, 0, 0.5625 on
+   the days checked), which is what makes this V3.16-specific.
+
+**Decided 2026-09-13 by the user, after that verification: keep masking to
+NaN.** The alternative considered and rejected was storing `-239976.0` exactly
+as raw and documenting it. The deciding argument is that `-239976` is not a
+measurement but `-9999 x 24`, so a stored sentinel silently destroys any
+spatial mean, sum or area-weighted aggregate whose domain touches the Arctic
+corner — a global mean for one day comes out near `-831 mm/day` — whereas NaN
+propagates as an explicit absence. The masking is recorded in the store's
+`source_fill_values_masked` attribute so it is never invisible.
+
+**Backfilling the block from V2.8.0 was also considered and rejected.** V2.8.0
+does have data there, but it is a different product: compared against V3.16 in
+the band immediately adjacent to the hole it correlates only 0.63-0.89, is
+systematically 1.5-3x wetter (bias -0.47 to -1.02 mm/day), and its RMSE against
+V3.16 is the same magnitude as the signal. Splicing it in would insert a
+15 x 15 degree rectangle of wet-biased values with a hard seam that looks like
+real data. V2.8.0 also ends 2020-12-30 against V3.16's 2025-06-29, so ~1,642 of
+16,982 days could not be backfilled at all.
+
 ### Known gap in V3.16
 
 `1993241.nc` (1993-08-29) and `1993243.nc` (1993-08-31) **do not exist** in the
