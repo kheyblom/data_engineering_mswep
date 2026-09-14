@@ -367,34 +367,56 @@ them has the corner defect.
 
 ### 10. Chunk objects on disk are NOT the reachable chunk count
 
-Three stores hold more objects than the arithmetic allows:
+Three stores hold more objects under `chunks/` than the manifest at the branch
+tip references:
 
-| store | objects | reachable arithmetic | excess |
+| store | objects on disk | manifest at tip | excess |
 |---|---|---|---|
-| `v_2_8.past.temporal` | 16,807 | 16,203 | **604** |
+| `v_2_8.past.temporal` | 16,807 | 16,203 | 604 |
 | `v_3_16.past.spatial` | 17,320 | 17,152 | 168 |
 | `v_2_8.past.spatial` | 15,647 | 15,495 | 152 |
 
-Two causes, both expected and both harmless:
+**A first reading of this was wrong, and the verifier corrected it.** The excess
+was put down to orphaned partial writes plus icechunk's per-commit fork
+snapshots. Running `garbage_collect` as a dry run -- which is what actually
+knows what is reachable -- shows two different causes, and the fork snapshots
+create no chunks at all:
 
-- **Partial region writes.** Both Tier 2 region benches were killed by walltime
-  *inside* a block. A block that never committed still left the chunks it had
-  already written on disk, unreferenced by any snapshot. `v_2_8.past.temporal`
-  carries 604 of them from the block 5 it was killed in.
-- **Fork snapshots.** Every `to_icechunk` write forks the session, so an append
-  build accumulates roughly one unreachable snapshot per commit -- 168 against
-  170 commits, 152 against 154. This is the behaviour GLEAM documented.
+| store | unreachable chunks | unreachable snapshots |
+|---|---|---|
+| `v_2_8.past.temporal` | **600 (3.57 GiB)** | 0 |
+| `v_3_16.past.temporal` | 0 | 0 |
+| `v_3_16.past.spatial` | 0 | 170 |
+| `v_2_8.past.spatial` | 0 | 154 |
+| the four others | 0 | 0-22 |
 
-**Neither is damage, and a file count cannot tell the difference, so it was
-checked in the direction that matters**: the interrupted blocks were read back
-and compared against raw. `v_3_16.past.temporal` at lat 1050-1199 (the block it
-was killed in) is bit-exact with exactly 2 NaN per series -- the two 1993 gap
-days, present *within* chunks rather than as missing chunks, as the temporal
-layout requires. `v_2_8.past.temporal` at lat 850-999 is bit-exact with 0 NaN.
+- **Only `v_2_8.past.temporal` has real orphans.** Its Tier 2 bench was killed by
+  walltime *after* the block it was writing had put 600 chunks down but before
+  it could commit them, so nothing references them. That is 3.57 GiB `--gc`
+  will reclaim.
+- **`v_3_16.past.temporal` has none**, despite also being walltime-killed
+  mid-block. It was killed during the block's *read* rather than its write, so
+  there was nothing to orphan. Two jobs killed the same way left different
+  residue, which is why this had to be measured per store rather than reasoned
+  about once.
+- **The spatial excess is not orphans at all.** Garbage collection reports zero
+  unreachable chunks there, so every object under `chunks/` is referenced by
+  some reachable snapshot -- earlier ones, not just the tip. It is history, and
+  `--gc` will not reclaim it while those snapshots stand.
+- The unreachable **snapshots** are the fork-per-commit behaviour GLEAM
+  documented: 170 against 170 commits, 154 against 154. They hold no chunks and
+  reclaim essentially nothing.
 
-`finalize_mswep_zarr.py --gc` is what reclaims these, and per the GLEAM
-procedure it runs after `--attrs` and `--tag`, dry-run first, re-verify after.
-Until then the excess is ~2 GB and costs nothing but disk.
+**The data itself was checked rather than inferred from any of this.** A file
+count cannot tell orphaned from wrong, so the blocks the bench was killed inside
+were read back and compared against raw: `v_3_16.past.temporal` at lat 1050-1199
+is bit-exact with exactly 2 NaN per series -- the two 1993 gap days, present
+within chunks rather than as missing chunks, as the temporal layout requires --
+and `v_2_8.past.temporal` at lat 850-999 is bit-exact with 0 NaN.
+
+The lesson worth keeping: **`find chunks/ -type f | wc -l` is not a verification
+signal.** Reachability is a question only the repository can answer, and
+`verify_mswep_zarr.py --phases structure` answers it in seconds.
 
 ### 11. Region blocks run faster than the bench projected
 

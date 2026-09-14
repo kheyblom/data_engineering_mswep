@@ -68,7 +68,16 @@ if [[ -z ${PBS_ENVIRONMENT:-} ]]; then
     if [[ -n ${AFTER:-} ]]; then
         qsub_args+=(-W "depend=${DEPEND}:${AFTER}")
     fi
-    qsub_args+=(-v "CONFIG=${CONFIG}")
+    # VERIFY switches the job from building a store to auditing one. It is
+    # worth a batch job for the same reason the build is: verifying a temporal
+    # store opens one raw file per sampled day, which is thousands of opens.
+    passthrough="CONFIG=${CONFIG}"
+    if [[ -n ${VERIFY:-} ]]; then
+        passthrough="${passthrough},VERIFY=1"
+        [[ -n ${VERIFY_ARGS:-} ]] && passthrough="${passthrough},VERIFY_ARGS=${VERIFY_ARGS}"
+        qsub_args+=(-N mswep_verify)
+    fi
+    qsub_args+=(-v "${passthrough}")
     # an absolute path so the submission does not depend on the caller's cwd
     exec qsub "${qsub_args[@]}" "$(readlink -f "$0")"
 fi
@@ -132,6 +141,15 @@ if (( workers > available )); then
     exit 1
 fi
 
-uv run python mswep_zarr.py --config "${CONFIG}"
+# the build is the default; VERIFY runs the read-only verifier over the same
+# config instead. The verifier never writes to the store -- its only destructive
+# call, garbage_collect, is always a dry run -- so this cannot damage anything
+# even if pointed at a finished store.
+if [[ -n ${VERIFY:-} ]]; then
+    # shellcheck disable=SC2086  # VERIFY_ARGS is deliberately word-split
+    uv run python verify_mswep_zarr.py --config "${CONFIG}" ${VERIFY_ARGS:-}
+else
+    uv run python mswep_zarr.py --config "${CONFIG}"
+fi
 
 echo "finished $(date)"
