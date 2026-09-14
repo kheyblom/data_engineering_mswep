@@ -53,24 +53,25 @@ numbers if the download is ever refreshed.
                                            v_3_16     past/daily     1979   1979001.nc
 ```
 
-- Versions on disk: `v_3_16` (16,980 files, 81.67 GB) and `v_2_8_0` (15,339
-  files, 51.84 GB). V3.16 is the target.
+- Versions on disk: `v_3_16` (16,980 files, 81.67 GB) and `v_2_8` (15,339
+  files, 51.84 GB), counting the `past/daily` product only; both versions also
+  carry an `nrt/daily` product that no config here reads. V3.16 is the target.
 - The version is spelled `V3.16` in the config and `v_3_16` on disk, and the
   product `Past/Daily` becomes `past/daily`. `access_mswep`'s `format_version`
   and `format_product` are the reference implementations of both translations;
   keep the two projects' spellings identical or a config cannot drive both.
-  Note MSWEP versions carry two *or* three dot-separated parts (`V3.16`,
-  `V2.8.0`), so this is not GLEAM's `v4.3a` regex.
+  Note an MSWEP version is dot-separated numbers with no letter suffix and no
+  fixed part count (`V3.16`, `V2.8`), so this is not GLEAM's `v4.3a` regex.
 - **One file per day**, not per year, and **one variable**, `precipitation`.
   Both differ from GLEAM and both change the cost model — see below.
 - Grid: `lat` 1800 (89.95 N to -89.95 S, north-to-south), `lon` 3600
   (-179.95 to 179.95), 0.1 degree, float32. **Identical to the GLEAM grid**, so
   GLEAM's spatial chunk reasoning transfers directly.
-- `time` is one step per file, float32 (v3.16) / int32 (v2.8.0)
+- `time` is one step per file, float32 (v3.16) / int32 (v2.8)
   `days since 1900-1-1 00:00:00`. First 28854 (1979-01-01), last 45835
   (2025-06-29).
 - `precipitation`: float32, `_FillValue = -9999.f`, `units = 'mm/d'` (v3.16) or
-  `'mm d-1'` (v2.8.0), `least_significant_digit = 2` (v3.16) / `1` (v2.8.0).
+  `'mm d-1'` (v2.8), `least_significant_digit = 2` (v3.16) / `1` (v2.8).
   There is no `standard_name` and no `long_name` on the data variable.
 - Full record uncompressed: 16,980 x 1800 x 3600 x 4 B = **410 GiB**. Raw on
   disk is 81.67 GB, so the source compresses about 5.4x.
@@ -88,7 +89,7 @@ measurement four orders of magnitude below zero.
 It covers a solid **150 x 150 block at array indices `[0:150, 0:150]`** — the
 grid's top-left corner, 75.05-89.95 N and 180-165 W, Arctic Ocean near the
 dateline — and is byte-identical on every day sampled across 1979-2025. It is
-the *only* negative value in the files. V2.8.0 has no negative values at all and
+the *only* negative value in the files. V2.8 has no negative values at all and
 does have data over that block, so this is a V3.16 production defect rather than
 a property of MSWEP.
 
@@ -123,7 +124,7 @@ this without new evidence:
    **byte-identical** to the stored copy (md5
    `e7e089885ee84e53f3c32404f85a4a32`); reading that fresh file shows the same
    values. So the defect is in GloH2O's published product, not in the transfer.
-3. V2.8.0 holds ordinary values at the identical cells (1.3125, 0, 0.5625 on
+3. V2.8 holds ordinary values at the identical cells (1.3125, 0, 0.5625 on
    the days checked), which is what makes this V3.16-specific.
 
 **Decided 2026-09-13 by the user, after that verification: keep masking to
@@ -135,20 +136,20 @@ corner — a global mean for one day comes out near `-831 mm/day` — whereas Na
 propagates as an explicit absence. The masking is recorded in the store's
 `source_fill_values_masked` attribute so it is never invisible.
 
-**Backfilling the block from V2.8.0 was also considered and rejected.** V2.8.0
+**Backfilling the block from V2.8 was also considered and rejected.** V2.8
 does have data there, but it is a different product: compared against V3.16 in
 the band immediately adjacent to the hole it correlates only 0.63-0.89, is
 systematically 1.5-3x wetter (bias -0.47 to -1.02 mm/day), and its RMSE against
 V3.16 is the same magnitude as the signal. Splicing it in would insert a
 15 x 15 degree rectangle of wet-biased values with a hard seam that looks like
-real data. V2.8.0 also ends 2020-12-30 against V3.16's 2025-06-29, so ~1,642 of
+real data. V2.8 also ends 2020-12-30 against V3.16's 2025-06-29, so ~1,642 of
 16,982 days could not be backfilled at all.
 
 ### Known gap in V3.16
 
 `1993241.nc` (1993-08-29) and `1993243.nc` (1993-08-31) **do not exist** in the
 V3.16 remote. The download verified 16,980/16,980 against the remote listing, so
-this is upstream, not a download failure; V2.8.0 has a complete 365 days for
+this is upstream, not a download failure; V2.8 has a complete 365 days for
 1993. Every other year is complete (365/366, and 180 days for the partial 2025).
 
 A complete daily axis 1979-01-01..2025-06-29 would be 16,982 steps; there are
@@ -254,7 +255,7 @@ spent once.
   writes one timestep at a time — so without a cache holding a whole 12-deep row
   each source chunk was decompressed twelve times, and fixing it measured 7.6x
   end to end. **MSWEP source chunks are one timestep deep**: `[1, 200, 200]` in
-  v3.16 and `[1, 32, 32]` in v2.8.0. There is nothing to re-decompress, so the
+  v3.16 and `[1, 32, 32]` in v2.8. There is nothing to re-decompress, so the
   large chunk cache buys little. Size it and confirm by measurement rather than
   copying 512.
 - **There is one variable, not fourteen.** So: no cross-variable merge and no

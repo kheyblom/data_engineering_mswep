@@ -85,7 +85,7 @@ WRITE_STRATEGIES = ('append', 'region')
 # netCDF encoding keys that describe the data rather than its container, and so
 # are provenance worth keeping. 'least_significant_digit' records that MSWEP
 # quantised the values before compressing them -- 2 decimal places in v3.16, 1
-# in v2.8.0 -- which is what a downstream consumer needs in order to know how
+# in v2.8 -- which is what a downstream consumer needs in order to know how
 # much of the float32 precision is real. The zarr backend rejects the key, and
 # build_encoding clears the encoding wholesale, so it is moved into the
 # variable's attributes first rather than lost.
@@ -502,7 +502,7 @@ def build_encoding(dataset, chunks, time_coord_chunk):
             encoding[name]['chunks'] = (time_coord_chunk,)
             # pin the calendar so every appended batch is encoded identically.
             # The raw files say 'days since 1900-1-1 00:00:00' and store the
-            # offset as float32 (v3.16) or int32 (v2.8.0); an int64 day count
+            # offset as float32 (v3.16) or int32 (v2.8); an int64 day count
             # is exact for both and is what the sibling GLEAM stores carry
             encoding[name]['units'] = 'days since 1900-01-01'
             encoding[name]['calendar'] = 'proleptic_gregorian'

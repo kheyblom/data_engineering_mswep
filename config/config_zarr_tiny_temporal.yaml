@@ -28,7 +28,7 @@ expected_missing_times:
 # near the dateline -- with -239976.0 on every single day of the record. That is
 # the declared _FillValue of -9999 summed over the 24 hourly steps the daily
 # total is built from, so upstream aggregated without propagating the mask.
-# V2.8.0 has no negative values at all, so this is a V3.16 production defect.
+# V2.8 has no negative values at all, so this is a V3.16 production defect.
 #
 # Declared rather than detected: a rule like 'mask anything negative' would also
 # hide a defect nobody has noticed, while a named value fails loudly if the next

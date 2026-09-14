@@ -30,10 +30,10 @@ from collections import namedtuple
 import pandas as pd
 import yaml # type: ignore
 
-# 'V3.16' -> '3.16', 'V2.8.0' -> '2.8.0'. MSWEP versions carry two or three dot
-# separated parts depending on the release, so the count is not fixed. Kept
-# identical to access_mswep's regex: the two projects have to spell a version
-# the same way or one config cannot drive both.
+# 'V3.16' -> '3.16', 'V2.8' -> '2.8'. A release can carry more dot separated
+# parts than the two on disk do, so the count is not fixed. Kept identical to
+# access_mswep's regex: the two projects have to spell a version the same way
+# or one config cannot drive both.
 VERSION_RE = re.compile(r'^[Vv](?P<number>\d+(?:\.\d+)*)$')
 
 # a four digit year directory sitting between the product and the files
@@ -85,11 +85,13 @@ def format_version(version):
     """Rewrite an MSWEP version for use in a directory or store name.
 
     Args:
-        version (str): Version as written in the config, e.g. 'V3.16'.
+        version (str): Version as written in the config, e.g. 'V3.16' or
+            'V2.8'.
 
     Returns:
         str: The version lowercased with the parts underscore separated, so
-            'V3.16' -> 'v_3_16' and 'V2.8.0' -> 'v_2_8_0'.
+            'V3.16' -> 'v_3_16' and 'V2.8' -> 'v_2_8'. However many parts the
+            version has are kept, since the count varies by release.
 
     Raises:
         ValueError: If the version is not a 'V' followed by dot separated
@@ -98,7 +100,7 @@ def format_version(version):
     match = VERSION_RE.match(version)
     if match is None:
         raise ValueError(
-            f"cannot parse version {version!r}, expected e.g. 'V3.16' or 'V2.8.0'"
+            f"cannot parse version {version!r}, expected e.g. 'V3.16' or 'V2.8'"
         )
     return 'v_' + '_'.join(match.group('number').split('.'))
 

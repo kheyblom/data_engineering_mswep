@@ -67,7 +67,7 @@ in V3.16; the sentinel actually written is **-239976.0** = `-9999 x 24`, on a
 solid 150 x 150 block at array indices `[0:150, 0:150]`, identical on every day
 sampled across 1979-2025. CF masking therefore does nothing and the value would
 have been stored as though it were a measurement four orders of magnitude below
-zero. V2.8.0 has no negative values at all.
+zero. V2.8 has no negative values at all.
 
 Handled by the `source_fill_values` config key, with `check_source_fill` failing
 the build if a declared sentinel does not actually occur.

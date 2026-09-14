@@ -39,7 +39,7 @@ expected_missing_times:
 # near the dateline -- with -239976.0 on every single day of the record. That is
 # the declared _FillValue of -9999 summed over the 24 hourly steps the daily
 # total is built from, so upstream aggregated without propagating the mask.
-# V2.8.0 has no negative values at all, so this is a V3.16 production defect.
+# V2.8 has no negative values at all, so this is a V3.16 production defect.
 #
 # Declared rather than detected: a rule like 'mask anything negative' would also
 # hide a defect nobody has noticed, while a named value fails loudly if the next
@@ -154,7 +154,7 @@ attrs:
     corner of the grid -- 75.05-89.95 N, 180-165 W -- and marked it -239976.0
     (the declared _FillValue of -9999 summed over 24 hourly steps) rather than
     with the declared fill value, on every day of the record. Those cells are
-    masked to NaN here; see the source_fill_values_masked attribute. V2.8.0 does
+    masked to NaN here; see the source_fill_values_masked attribute. V2.8 does
     have data over that block. Under this chunking that block IS what makes
     chunks absent: the 7 x 7 = 49 tiles lying entirely inside it are NaN across
     the whole record, so the array holds 16151 chunks rather than 16200 and that

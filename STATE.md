@@ -40,7 +40,7 @@ Then size the production chain from what they measure, and run Task 5.
   total is built from, so upstream aggregated without propagating the mask. It
   marks a solid 150 x 150 block at array indices `[0:150, 0:150]`
   (75.05-89.95 N, 180-165 W, Arctic Ocean near the dateline) on **every day** of
-  the record. V2.8.0 has no negative values at all. Because the value in the
+  the record. V2.8 has no negative values at all. Because the value in the
   data does not match the attribute, xarray's CF masking leaves it in place, and
   it would have been written to the store as though it were a measurement.
   Handled by the `source_fill_values` config key: declared rather than detected
@@ -56,7 +56,7 @@ Then size the production chain from what they measure, and run Task 5.
   **Confirmed by the user 2026-09-13 after that verification: keep masking to
   NaN.** Storing the raw `-239976` exactly was considered and rejected -- it is
   `-9999 x 24`, not a measurement, so it would silently destroy any spatial
-  aggregate touching the Arctic corner. Backfilling from V2.8.0 was also
+  aggregate touching the Arctic corner. Backfilling from V2.8 was also
   rejected: it correlates only 0.63-0.89 with V3.16 next to the hole, runs
   1.5-3x wetter, and ends in 2020 so it could not cover ~1,642 days anyway.
 
@@ -109,7 +109,9 @@ Measured 2026-09-13; see CLAUDE.md for the full input-data section.
 - Raw tree: `/glade/derecho/scratch/kheyblom/data/mswep/v_3_16/raw/past/daily/<year>/YYYYDOY.nc`
 - V3.16: 16,980 files, 81.67 GB on disk, download verified complete against the
   remote listing on 2026-09-13 14:49.
-- V2.8.0 also present: 15,339 files, 51.84 GB.
+- V2.8 also present: 15,339 files, 51.84 GB. Both file counts are the
+  `past/daily` product; an `nrt/daily` product is also on disk under each
+  version and is not read by any config here.
 - One variable, `precipitation`, float32, `_FillValue = -9999`, `mm/d`.
 - Grid 1800 lat x 3600 lon at 0.1 degree, identical to GLEAM's.
 - Source chunking `[1, 200, 200]` (v3.16), deflate 1 + shuffle.
@@ -123,7 +125,7 @@ Measured 2026-09-13; see CLAUDE.md for the full input-data section.
 - Read `data_engineering_gleam` end to end (`CLAUDE.md`, configs, `gleam_zarr.py`,
   `utils/`, `submit_gleam_zarr.sh`) and `access_mswep` (`README.md`, configs,
   path/version logic) to establish what transfers.
-- Inspected the raw V3.16 and V2.8.0 netCDF headers, coordinates and per-year
+- Inspected the raw V3.16 and V2.8 netCDF headers, coordinates and per-year
   file counts; found the two missing 1993 days.
 - Initialised the repo, wrote `.gitignore`, `pyproject.toml`, `CLAUDE.md` and
   this file; connected the `origin` remote over SSH.
