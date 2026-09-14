@@ -9,57 +9,58 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-13 (Tasks 1-3 done; 12 configs written and validated;
-Tier 2 bench awaiting submission approval)
-
-**Scope is now 8 stores**, not 2: {V3.16, V2.8} x {past, nrt} x {spatial,
-temporal}. See TASKS.md for the approved scope change.
+Last updated: 2026-09-14 (all 8 stores built; verifier still to be written)
 
 | # | Task | State |
 |---|------|-------|
 | 1 | Set up git repo | **done** |
-| 2 | Build the zarr-building codebase | **done** — both write strategies validated end to end |
-| 3 | Decide the chunking strategy | **done** — approved 2026-09-13 |
-| 4 | Test the codebase (spatial) | Tier 0 + Tier 1 **passed**; Tier 2 batch bench **not run** |
-| 5 | Run the spatial builds | not started (4 stores) |
-| 6 | Verify the spatial stores | blocked — `verify_mswep_zarr.py` does not exist yet |
-| 7 | Test the codebase (temporal) | Tier 0 + Tier 1 **passed**; Tier 2 batch bench **not run** |
-| 8 | Verify the temporal stores | blocked — `verify_mswep_zarr.py` does not exist yet |
+| 2 | Build the zarr-building codebase | **done** |
+| 3 | Decide the chunking strategy | **done** |
+| 4 | Test the codebase (spatial) | **done** - Tier 0, 1 and 2 all passed |
+| 5 | Run the builds | **done** - all 8 stores |
+| 6 | Verify the spatial stores | **blocked** - `verify_mswep_zarr.py` does not exist |
+| 7 | Test the codebase (temporal) | **done** - Tier 0, 1 and 2 all passed |
+| 8 | Verify the temporal stores | **blocked** - `verify_mswep_zarr.py` does not exist |
 
-Per-store build status — none built yet:
+All eight stores built, 315 GB total, each with the expected axis, regular daily
+spacing, intended chunking and bit-exact values on sampled days:
 
-| store | axis | gaps | strategy | chunk | block |
-|---|---|---|---|---|---|
-| `v_3_16.past.spatial` | 16,982 | 2 | append, 170 commits | (1,1800,3600) 24.7 MiB | — |
-| `v_3_16.past.temporal` | 16,982 | 2 | region, 9 blocks | (16982,20,20) 25.9 MiB | 45.5 GiB |
-| `v_3_16.nrt.spatial` | 684 | 0 | append, 7 commits | (1,1800,3600) 24.7 MiB | — |
-| `v_3_16.nrt.temporal` | 684 | 0 | region, 9 blocks | (684,20,20) 1.0 MiB | 1.8 GiB |
-| `v_2_8.past.spatial` | 15,339 | 0 | append, 154 commits | (1,1800,3600) 24.7 MiB | — |
-| `v_2_8.past.temporal` | 15,339 | 0 | region, 9 blocks | (15339,20,20) 23.4 MiB | 41.1 GiB |
-| `v_2_8.nrt.spatial` | 2,117 | 0 | append, 22 commits | (1,1800,3600) 24.7 MiB | — |
-| `v_2_8.nrt.temporal` | 2,117 | 0 | region, 9 blocks | (2117,20,20) 3.2 MiB | 5.7 GiB |
+| store | days | size | chunk objects |
+|---|---|---|---|
+| `v_3_16.past.spatial` | 16,982 | 87 G | 17,320 |
+| `v_3_16.past.temporal` | 16,982 | 86 G | 16,154 |
+| `v_3_16.nrt.spatial` | 684 | 3.5 G | 698 |
+| `v_3_16.nrt.temporal` | 684 | 3.5 G | 16,203 |
+| `v_2_8.past.spatial` | 15,339 | 53 G | 15,647 |
+| `v_2_8.past.temporal` | 15,339 | 57 G | 16,807 |
+| `v_2_8.nrt.spatial` | 2,117 | 13 G | 2,161 |
+| `v_2_8.nrt.temporal` | 2,117 | 14 G | 16,203 |
+
+`v_3_16.past.temporal` landing on 16,154 is the exact prediction (16,200 tiles
+minus the 49 inside the all-NaN corner, plus 3 coordinates).
 
 ## Next action
 
-**Building the remaining stores.** The four Tier 2 bench stores were promoted to
-production names rather than thrown away (approved 2026-09-13) -- renaming an
-icechunk store is safe, verified on a throwaway copy first.
+**Write `verify_mswep_zarr.py`.** Tasks 6 and 8 are blocked on it and no store
+may carry a `verification` attribute until it has run. Model it on
+`data_engineering_gleam/verify_gleam_zarr.py`: read-only, phase-selectable,
+non-zero exit on any failure. What it has to cover here:
 
-Store status after promotion:
+- `sweep` - every chunk off the manifest, no data read. The only full-coverage
+  check available, and the thing to run first.
+- the **reachable** chunk count against prediction, since three stores hold
+  unreachable objects from killed bench blocks and per-commit forks and a raw
+  file count cannot tell those apart (see TESTING.md finding 10).
+- whether any cell **other** than the 150 x 150 corner carries -239976.0 in
+  V3.16 Past. The build only checks the first timestep, deliberately.
+- physical range. `v_2_8.nrt` showed 771.9 mm/day on 2026-09-13, well above the
+  234-296 of other sampled days - plausible for extreme rainfall but worth an
+  explicit check rather than a shrug.
+- cross-store metadata comparison, which is the safeguard against drift across
+  eight hand-written configs.
 
-| store | state |
-|---|---|
-| `v_3_16.past.spatial` | **complete**, 16,982 steps, verified bit-exact |
-| `v_2_8.past.spatial` | **complete**, 15,339 steps, verified bit-exact |
-| `v_3_16.past.temporal` | 5 of 9 blocks; remaining lat[1000:1800) |
-| `v_2_8.past.temporal` | 4 of 9 blocks; remaining lat[800:1800) |
-| the four `nrt` stores | not started |
-
-Promoting saved ~9 core-hours on the two finished spatial stores and ~5 more by
-resuming the two partial region stores instead of restarting them.
-
-Then: write `verify_mswep_zarr.py` (tasks 6 and 8 are blocked on it) and
-`finalize_mswep_zarr.py`.
+Then `finalize_mswep_zarr.py`: `--attrs`, then `--tag`, then `--gc`, in that
+order, dry-run before `--gc --apply`, re-verify after.
 
 ## Decisions made
 

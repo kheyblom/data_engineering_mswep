@@ -332,3 +332,74 @@ One per opened file. It is correct — a 200 row read chunk does straddle the
 align with a 32 row grid, since 1800/32 = 56.25). But at one warning per file it
 buries the job log. Worth suppressing for this known case rather than leaving
 every V2.8 job output at 4.5 MB.
+
+## Tier 3: the production builds (2026-09-14)
+
+All eight stores built. Four were promoted from the Tier 2 bench rather than
+rebuilt (the two completed append stores, and the two partial region stores
+resumed from 5 and 4 committed blocks), which saved ~14 core-hours.
+
+| store | build | days | size | chunk objects |
+|---|---|---|---|---|
+| `v_3_16.past.spatial` | append, 1.13 h | 16,982 | 87 G | 17,320 |
+| `v_3_16.past.temporal` | region, 3.01 h + 1.73 h resume | 16,982 | 86 G | **16,154** |
+| `v_3_16.nrt.spatial` | append, 2.4 min | 684 | 3.5 G | 698 |
+| `v_3_16.nrt.temporal` | region, 5.4 min | 684 | 3.5 G | 16,203 |
+| `v_2_8.past.spatial` | append, 1.16 h | 15,339 | 53 G | 15,647 |
+| `v_2_8.past.temporal` | region, 2.72 h + 2.18 h resume | 15,339 | 57 G | 16,807 |
+| `v_2_8.nrt.spatial` | append, 10.2 min | 2,117 | 13 G | 2,161 |
+| `v_2_8.nrt.temporal` | region, 23.4 min | 2,117 | 14 G | 16,203 |
+
+Total 315 GB. Every store: correct shape and chunking, axis of the expected
+length, strictly regular spacing, and values **bit-exact against the raw netCDF**
+on sampled days.
+
+### 9. The corner-tile prediction came out exactly right
+
+`v_3_16.past.temporal` holds **16,154** chunk objects: 16,151 data chunks plus
+3 coordinates. 16,200 tiles minus the 7 x 7 = 49 tiles lying entirely inside the
+150 x 150 all-NaN corner is 16,151, which is what CLAUDE.md predicted before the
+build. Nothing else in this project has confirmed the sentinel masking so
+directly -- the arithmetic and the store agree with no slack.
+
+The other three temporal stores hold 16,203 (16,200 + 3), as they must: none of
+them has the corner defect.
+
+### 10. Chunk objects on disk are NOT the reachable chunk count
+
+Three stores hold more objects than the arithmetic allows:
+
+| store | objects | reachable arithmetic | excess |
+|---|---|---|---|
+| `v_2_8.past.temporal` | 16,807 | 16,203 | **604** |
+| `v_3_16.past.spatial` | 17,320 | 17,152 | 168 |
+| `v_2_8.past.spatial` | 15,647 | 15,495 | 152 |
+
+Two causes, both expected and both harmless:
+
+- **Partial region writes.** Both Tier 2 region benches were killed by walltime
+  *inside* a block. A block that never committed still left the chunks it had
+  already written on disk, unreferenced by any snapshot. `v_2_8.past.temporal`
+  carries 604 of them from the block 5 it was killed in.
+- **Fork snapshots.** Every `to_icechunk` write forks the session, so an append
+  build accumulates roughly one unreachable snapshot per commit -- 168 against
+  170 commits, 152 against 154. This is the behaviour GLEAM documented.
+
+**Neither is damage, and a file count cannot tell the difference, so it was
+checked in the direction that matters**: the interrupted blocks were read back
+and compared against raw. `v_3_16.past.temporal` at lat 1050-1199 (the block it
+was killed in) is bit-exact with exactly 2 NaN per series -- the two 1993 gap
+days, present *within* chunks rather than as missing chunks, as the temporal
+layout requires. `v_2_8.past.temporal` at lat 850-999 is bit-exact with 0 NaN.
+
+`finalize_mswep_zarr.py --gc` is what reclaims these, and per the GLEAM
+procedure it runs after `--attrs` and `--tag`, dry-run first, re-verify after.
+Until then the excess is ~2 GB and costs nothing but disk.
+
+### 11. Region blocks run faster than the bench projected
+
+The bench measured 31.8 and 36.6 min per block and projected 5.1 h and 5.8 h for
+a full 9-block build. The resumes ran their remaining blocks at 12-25 min each
+and finished in 1.73 h and 2.18 h. Block cost varies with how much of the band
+is ocean, so the mid-latitude bands the bench happened to measure are the
+expensive ones. Size a chain from the *slowest* blocks, not the mean.

@@ -43,10 +43,16 @@ and the NRT stores say plainly that they are not gauge-corrected.
 
 ## Status
 
-The build pipeline is written and validated on a one-year fixture, both write
-strategies, including interrupt and resume. All 12 configs (8 production +
-4 bench) are written and pass the Tier 0 checks. **Nothing has been built at
-production scale yet**, and `verify_mswep_zarr.py` does not exist.
+**All eight stores are built** (2026-09-14, 315 GB total). Every one has the
+expected axis length, a strictly regular daily spacing, the intended chunking,
+and values bit-exact against the raw netCDF on sampled days.
+
+They are **not yet formally verified**: `verify_mswep_zarr.py` does not exist,
+so no store carries a `verification` attribute, and none has been finalized
+(`finalize_mswep_zarr.py` -- attrs, tag, gc -- is also still to be written).
+Three stores carry unreachable objects left by walltime-killed bench blocks and
+by icechunk's per-commit forks; `--gc` is what reclaims them. See
+[TESTING.md](TESTING.md).
 
 [STATE.md](STATE.md) is the current working state and the place to pick up from;
 [TASKS.md](TASKS.md) is the task list; [TESTING.md](TESTING.md) records what was

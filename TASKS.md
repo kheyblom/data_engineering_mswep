@@ -9,10 +9,10 @@ This project will conduct the following tasks:
     > Output structure should be inline with @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
 3. [DONE 2026-09-13] determine a chunking strategy for spatial and temporal zarr stores
     > I need to approve final decisions for this
-4. [Tier 0 + Tier 1 DONE 2026-09-13; Tier 2 batch bench outstanding] test the codebase for the spatial zarr build. use a similar testing procedure as in @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
-5. after testing is complete and codebase is verified, run the spatial zarr build.
+4. [DONE 2026-09-14 - Tier 0, Tier 1 and Tier 2 all passed] test the codebase for the spatial zarr build. use a similar testing procedure as in @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
+5. [DONE 2026-09-14 - all 8 stores built, spatial and temporal] after testing is complete and codebase is verified, run the spatial zarr build.
 6. verify the spatial zarr store. run a similar verification to @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam
-7. [Tier 0 + Tier 1 DONE 2026-09-13; Tier 2 batch bench outstanding] test the codebase again for the temporal zarr build.
+7. [DONE 2026-09-14 - Tier 0, Tier 1 and Tier 2 all passed] test the codebase again for the temporal zarr build.
 8. verify the temporal zarr store
 
 SCOPE CHANGE, approved 2026-09-13. Tasks 4-8 were written for ONE spatial and
