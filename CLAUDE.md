@@ -20,13 +20,16 @@ store has to be trusted to trust another. That is a deliberate choice carried
 over from `data_engineering_gleam`: do not "optimise" a temporal build into a
 rechunk of its spatial sibling, and do not merge Past with NRT.
 
-One config drives one store, and the store's name carries the release, the
-product and the layout:
+One config drives one store. The store sits in a directory named for its
+layout, and its name carries the release, the product and the variable:
 
 ```
-mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
-mswep.v_3_16.past.daily.native_0p1x0p1.spatial.zarr
+{suffix}/mswep.{version}.{period}.{frequency}.{grid_name}.{variable}.zarr
+spatial/mswep.v_3_16.past.day.native_0p1x0p1.precipitation.zarr
 ```
+
+That spelling comes from the data engineering style guide -- see the section
+below, and do not change it without reading that section first.
 
 **This project is modelled directly on
 [data_engineering_gleam](/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam).**
@@ -37,6 +40,70 @@ which ones do not, and why.
 Working state, and where to pick up after a lost connection or a new session,
 is in [STATE.md](STATE.md). Keep it current — it is the handoff document.
 The task list the project is working through is [TASKS.md](TASKS.md).
+
+## Nomenclature, units and store naming
+
+Governed by
+[style-guide_data_engineering.md](/glade/u/home/kheyblom/work/style_guides/style-guide_data_engineering.md)
+and the authoritative
+[nomenclature_data.md](/glade/u/home/kheyblom/work/style_guides/nomenclature_data.md).
+The project's own mapping onto them is `nomenclature-key_mswep.md` at the repo
+root, and **that file is machine read**: `utils/nomenclature.py` parses its two
+tables and is the only place the pipeline learns what a variable is called.
+Edit the tables, not the code. Never restate the mapping in Python -- a dict
+here and a table there are two sources of truth for the one thing the guide
+exists to make single.
+
+What the guide costs this project, all of it settled 2026-09-15:
+
+- **`precipitation` needs no rename.** It is already the canonical name, which
+  is why there is no array-rename step here and there is one in
+  `data_engineering_gleam`.
+- **Units are `mm d-1`, not `mm/d`.** The same unit, respelled so udunits can
+  parse it; the `unit_conversion` in the key is `none` and **no value is ever
+  changed**. Note the four raw products do not agree upstream -- V2.8 Past
+  already publishes `mm d-1` and the other three publish `mm/d` -- so the
+  `original_units` attribute is read off the data, never from the key's single
+  column.
+- **The frequency token is `day`, not `daily`.** `daily` is GloH2O's spelling
+  and stays in the raw directory path (`raw/past/daily/`) and in prose
+  describing the source. `day` is what goes in the store name and in the
+  `temporal_frequency` attribute, with `original_temporal_frequency: daily`
+  beside it. Same split `format_version` already makes between `V3.16` in the
+  config and `v_3_16` in the name.
+- **`standard_name` stays `precipitation_flux`**, diverging from GLEAM
+  deliberately: it is a genuine CF standard name, so overwriting it with the
+  canonical variable name would lose information. The guide says nothing about
+  `standard_name`.
+- **Two approved deviations from the guide's five component filename**: the
+  layout is a parent directory, and the product keeps its own component. Both
+  are written up in `nomenclature-key_mswep.md` with the alternatives that were
+  rejected. The guide requires any deviation to be approved; these were, on
+  2026-09-15. Do not add a third without asking.
+
+### Migrating a built store rather than rebuilding it
+
+`migrate_nomenclature.py` did this once, for the eight stores built before the
+guide, and is **temporary** -- delete it once the pipeline refactor and its
+tests land. Three findings from it are worth keeping:
+
+- **`finalize_mswep_zarr.py --attrs` cannot migrate a store.** It opens only the
+  root group, so it never touches a variable's own attributes, and it merges
+  rather than replaces, so it can add and overwrite but never drop. Anything
+  that has to change a variable attribute or remove a root one needs its own
+  code.
+- **A migration commit must not look like a build commit.** `build_history`
+  derives `date_created` and the commit count from the commits that are not
+  finalization, so an unrecognised message would push `date_created` forward on
+  every later `--attrs` run. `NON_BUILD_MESSAGES` in `finalize_mswep_zarr.py` is
+  where that is handled, and it has to outlive the migration script because the
+  commits outlive it.
+- **The right proof for a metadata-only change is the chunk manifest, not a
+  re-read.** Comparing the complete manifest, the chunk storage statistics and
+  the array's shape, chunks, dtype and fill value either side proves not one
+  chunk moved, which no amount of sampling values could, and it costs a metadata
+  walk instead of core-hours. Renaming the directory is checked the same way,
+  against the repository reopened at its new path.
 
 ## Working on this system
 

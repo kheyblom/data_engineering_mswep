@@ -9,31 +9,73 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-14 (all 8 stores built, verified, finalized and tagged;
-nothing outstanding)
+Last updated: 2026-09-15 (all 8 stores migrated onto the data engineering style
+guide; **task 1.a done, 1.b next**)
 
-**All eight tasks in TASKS.md are complete.** 396 checks across the eight
-stores, **0 failures**, ~630 million cells compared bit-exactly against the raw
-netCDF files.
+The original eight tasks are complete: 396 checks across the eight stores, **0
+failures**, ~630 million cells compared bit-exactly against the raw netCDF
+files. A new task list, [TASKS.md](TASKS.md) Task 1, aligns the project with the
+data engineering style guide
+(`/glade/u/home/kheyblom/work/style_guides/style-guide_data_engineering.md`).
 
-| store | days | size | checks | absent chunks |
-|---|---|---|---|---|
-| `v_3_16.past.spatial` | 16,982 | 87 G | 49 / 0 fail | 2 (1993 gap days) |
-| `v_3_16.past.temporal` | 16,982 | 86 G | 52 / 0 fail | 49 (corner tiles) |
-| `v_3_16.nrt.spatial` | 684 | 3.5 G | 47 / 0 fail | 0 |
-| `v_3_16.nrt.temporal` | 684 | 3.5 G | 51 / 0 fail | 0 |
-| `v_2_8.past.spatial` | 15,339 | 53 G | 48 / 0 fail | 0 |
-| `v_2_8.past.temporal` | 15,339 | 54 G | 51 / 0 fail | 0 |
-| `v_2_8.nrt.spatial` | 2,117 | 13 G | 47 / 0 fail | 0 |
-| `v_2_8.nrt.temporal` | 2,117 | 14 G | 51 / 0 fail | 0 |
+**Task 1.a is done.** All eight stores were migrated in place on 2026-09-15 --
+metadata only, no data read, written or moved, no core-hours spent. They now
+live under a layout directory and carry the canonical spellings:
 
-Every absent chunk was traced to raw rather than assumed.
+```
+<download>/<version>/zarr/{spatial,temporal}/mswep.<version>.<period>.day.native_0p1x0p1.precipitation.zarr
+```
+
+| store (new path) | days | checks | chunks |
+|---|---|---|---|
+| `spatial/mswep.v_3_16.past.day...precipitation.zarr` | 16,982 | 49 / 0 fail | 16,980 (2 absent: 1993 gap days) |
+| `temporal/mswep.v_3_16.past.day...precipitation.zarr` | 16,982 | 52 / 0 fail | 16,151 (49 absent: corner tiles) |
+| `spatial/mswep.v_3_16.nrt.day...precipitation.zarr` | 684 | 47 / 0 fail | 684 |
+| `temporal/mswep.v_3_16.nrt.day...precipitation.zarr` | 684 | 51 / 0 fail | 16,200 |
+| `spatial/mswep.v_2_8.past.day...precipitation.zarr` | 15,339 | 48 / 0 fail | 15,339 |
+| `temporal/mswep.v_2_8.past.day...precipitation.zarr` | 15,339 | 51 / 0 fail | 16,200 |
+| `spatial/mswep.v_2_8.nrt.day...precipitation.zarr` | 2,117 | 47 / 0 fail | 2,117 |
+| `temporal/mswep.v_2_8.nrt.day...precipitation.zarr` | 2,117 | 51 / 0 fail | 16,200 |
+
+The chunk counts are from the migration's own fingerprint, taken before and
+after and again after the directory moved; every one is identical to what the
+build wrote, and every absent chunk was traced to raw rather than assumed. Each
+store now carries two tags: the original
+`<release>-<product>-<layout>-verified-20260914`, which is the rollback point,
+and `<release>-<product>-<layout>-nomenclature-20260915` at the migrated tip.
 
 ## Next action
 
-**Nothing outstanding. The project is complete.** All eight tasks in TASKS.md
-are done: eight stores built, verified, attributed, tagged, and collected where
-collection was worth doing.
+**Task 1.b: make the pipeline build into this state directly.** The stores are
+migrated; the code that produced them is not. Start with:
+
+1. `config/*.yaml` -- the filename template becomes
+   `{suffix}/mswep.{version}.{period}.{frequency}.{grid_name}.{variable}.zarr`,
+   with `frequency` and `variable` resolved through `utils/nomenclature.py`
+   rather than written by hand. `migrate_nomenclature.MIGRATED_FILENAME` is the
+   string to move.
+2. `variable_attrs` -- must now set `units`, `long_name` and the `original_*`
+   provenance. It deliberately did not set `units` before.
+3. The three `attrs` entries whose prose the migration rewrote:
+   `cf_compliance`, `chunking`, `related_store`. See the hazard below.
+4. `verify_mswep_zarr.py` -- its required-global-attrs tuple, its `LAYOUT_ATTRS`
+   map and its commit-count expectation all predate the migration and do not
+   know about the new attributes or the extra commit. It was **not** run after
+   the migration, by decision; it is the first thing 1.b has to pick up.
+5. Delete `migrate_nomenclature.py` once 1.b and 1.c land. It says so itself.
+
+### Hazard: do not run `finalize --attrs --apply` until 1.b updates the configs
+
+The finalizer merges the config's `attrs` section over what the store holds, so
+against today's configs it would **revert** exactly three attributes the
+migration rewrote -- `cf_compliance`, `chunking` and `related_store` -- back to
+prose that names `daily` store paths and claims the units do not parse under
+udunits. `--status` reports this as '3 pending'; that is the stale config, not
+work left undone. Verified 2026-09-15 by dry run.
+
+Likewise **do not run `--gc --apply`** on any store yet. It is irreversible and
+would discard the snapshot the `...-verified-20260914` tag makes the rollback
+point.
 
 If the record is refreshed later, the cycle is:
 
@@ -55,6 +97,44 @@ but collecting them frees **0.00 GiB**, and it was deliberately not run. Do not
 read it as work left undone.
 
 ## Decisions made
+
+- **2026-09-15, style guide alignment migrated in place, not rebuilt (task
+  1.a).** Every gap between the built stores and the data engineering style
+  guide was metadata: `precipitation` is already the canonical variable name,
+  float32 is already the published dtype, and `mm/d` -> `mm d-1` is a respelling
+  of the same unit, so `nomenclature-key_mswep.md` records the unit conversion
+  as `none`. Rebuilding would have spent the whole original build cost to
+  produce byte-identical chunks. `migrate_nomenclature.py` instead wrote one
+  metadata commit per store and renamed eight directories, on a login node, in
+  minutes, for zero core-hours.
+  **Verification was by chunk-manifest fingerprint rather than a verifier
+  re-run**, chosen by the user: the complete manifest, the chunk storage
+  statistics and the array's shape, chunks, dtype and fill value are compared
+  before and after the commit and again after the directory moves. That proves
+  not one chunk moved, which a sampled re-read of values could not, and it costs
+  a metadata walk. All eight passed, and the `verification` attribute each store
+  already carried is therefore still true and was left untouched.
+
+- **2026-09-15, two approved deviations from the guide's filename.** The guide
+  specifies five components,
+  `<data_source>.<version>.<temporal_frequency>.<grid_name>.<variable>.zarr`,
+  and MSWEP needs two facts it has no slot for. The **layout** became a parent
+  directory, `spatial/` or `temporal/` -- the guide mandates separate spatial
+  and temporal stores and then gives the name nowhere to say which is which, and
+  a directory matches how `data_engineering_gleam` lays its stores out. The
+  **product** kept its own component, `past` or `nrt`, making six. Folding it
+  into the version (`v_3_16_past`) or the source (`mswep_past`) would have kept
+  five and was rejected: the product is neither a release nor a source, and
+  spelling it as one would misdescribe it in a slot downstream tooling reads as
+  one. Both approved by the user, both recorded in `nomenclature-key_mswep.md`.
+
+- **2026-09-15, `standard_name` stays `precipitation_flux`.** This diverges from
+  `data_engineering_gleam`, whose migration overwrites `standard_name` with the
+  canonical variable name. It can do that because GLEAM's canonical names are
+  not CF standard names and nothing is lost. `precipitation_flux` *is* a genuine
+  CF standard name, so overwriting it with `precipitation` would trade real
+  information for a duplicate of the variable name, and the style guide has no
+  rule about `standard_name` either way.
 
 - **2026-09-13, separate Past and NRT stores (scope: 8 stores).** MSWEP
   publishes each release as two products that are NOT the same estimate: `Past`
@@ -169,6 +249,30 @@ Measured 2026-09-13; see CLAUDE.md for the full input-data section.
 - Days present: 1979-01-01 through 2025-06-29, less the two 1993 days above.
 
 ## Work log
+
+### 2026-09-15 — Task 1.a, style guide alignment
+
+- Read the data engineering style guide and `nomenclature_data.md`, and the
+  uncommitted alignment work in `data_engineering_gleam`
+  (`migrate_nomenclature.py`, `utils/nomenclature.py`,
+  `nomenclature-key_gleam.md`). That design was lifted rather than re-derived;
+  MSWEP's job is smaller because there is no array to rename.
+- Wrote `nomenclature-key_mswep.md` in the machine-read shape and
+  `utils/nomenclature.py` to parse it, so the key and the stores cannot drift.
+- Established that `finalize_mswep_zarr.py --attrs` could not do this job: it
+  opens only the root group, so it cannot touch the variable's own attributes,
+  and it merges rather than replaces, so it cannot drop the `cf_compliance` text
+  that claims the units do not parse.
+- Taught `build_history` to ignore the migration's commit message, or
+  `date_created` would jump to the migration date on every later `--attrs`.
+- Migrated all eight stores, dry run first. Each fingerprint matched either side
+  of the commit and again after the rename; a re-run reports 'already migrated'.
+- Tagged all eight at the migrated tip through `finalize --tag`, driven by
+  rendered configs so the tags were made by the same code path every future tag
+  will use.
+- Checked all eight end to end, read only: paths, layout directories, variable
+  and root attributes, sibling cross-references, dims, chunk shapes, dtype and
+  both tags. All pass.
 
 ### 2026-09-13 — Task 1
 

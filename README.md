@@ -28,18 +28,24 @@ layout, so eight stores in all:
 
 | store | record | days | best for |
 |---|---|---|---|
-| `mswep.v_3_16.past.daily.native_0p1x0p1.spatial.zarr` | 1979-01-01 .. 2025-06-29 | 16,982 | maps, fields |
-| `mswep.v_3_16.past.daily.native_0p1x0p1.temporal.zarr` | " | " | point time series |
-| `mswep.v_3_16.nrt.daily.native_0p1x0p1.spatial.zarr` | 2024-10-30 .. 2026-09-13 | 684 | maps, fields |
-| `mswep.v_3_16.nrt.daily.native_0p1x0p1.temporal.zarr` | " | " | point time series |
-| `mswep.v_2_8.past.daily.native_0p1x0p1.spatial.zarr` | 1979-01-02 .. 2020-12-30 | 15,339 | maps, fields |
-| `mswep.v_2_8.past.daily.native_0p1x0p1.temporal.zarr` | " | " | point time series |
-| `mswep.v_2_8.nrt.daily.native_0p1x0p1.spatial.zarr` | 2020-11-27 .. 2026-09-13 | 2,117 | maps, fields |
-| `mswep.v_2_8.nrt.daily.native_0p1x0p1.temporal.zarr` | " | " | point time series |
+| `spatial/mswep.v_3_16.past.day.native_0p1x0p1.precipitation.zarr` | 1979-01-01 .. 2025-06-29 | 16,982 | maps, fields |
+| `temporal/mswep.v_3_16.past.day.native_0p1x0p1.precipitation.zarr` | " | " | point time series |
+| `spatial/mswep.v_3_16.nrt.day.native_0p1x0p1.precipitation.zarr` | 2024-10-30 .. 2026-09-13 | 684 | maps, fields |
+| `temporal/mswep.v_3_16.nrt.day.native_0p1x0p1.precipitation.zarr` | " | " | point time series |
+| `spatial/mswep.v_2_8.past.day.native_0p1x0p1.precipitation.zarr` | 1979-01-02 .. 2020-12-30 | 15,339 | maps, fields |
+| `temporal/mswep.v_2_8.past.day.native_0p1x0p1.precipitation.zarr` | " | " | point time series |
+| `spatial/mswep.v_2_8.nrt.day.native_0p1x0p1.precipitation.zarr` | 2020-11-27 .. 2026-09-13 | 2,117 | maps, fields |
+| `temporal/mswep.v_2_8.nrt.day.native_0p1x0p1.precipitation.zarr` | " | " | point time series |
 
 They live under `<download>/<version>/zarr/`. **Prefer a Past store wherever it
 covers the day you want** — every store's `product_caveat` attribute says so,
 and the NRT stores say plainly that they are not gauge-corrected.
+
+The names follow the data engineering style guide: the variable in the name, the
+canonical frequency token `day`, and the layout as the directory above.
+`nomenclature-key_mswep.md` records that mapping, the two approved deviations
+from the guide's filename, and the fact that respelling the units `mm/d` ->
+`mm d-1` changed no value.
 
 ## Status
 
@@ -52,6 +58,18 @@ million cells compared against the raw files. Each store then took its
 provenance and discovery attributes, and an immutable tag
 `<release>-<product>-<layout>-verified-20260914`. A store carries a
 `verification` attribute only because the verifier actually passed on it.
+
+**All eight were then migrated onto the data engineering style guide**
+(2026-09-15, `migrate_nomenclature.py`): renamed, units respelled `mm d-1`, and
+the nomenclature and frequency attributes added. Metadata only -- the chunk
+manifest, the storage statistics and every array's shape, chunks, dtype and fill
+value are identical either side, so the verification above still stands and was
+not re-run. Each store carries a second tag,
+`<release>-<product>-<layout>-nomenclature-20260915`, at the migrated tip; the
+first tag is the rollback point. The pipeline itself has **not** yet been
+changed to build into this state -- that is Task 1.b in [TASKS.md](TASKS.md),
+and until it lands `finalize --attrs --apply` would revert three attributes.
+See [STATE.md](STATE.md).
 
 Garbage collection ran on `v_2_8.past.temporal` alone -- the only store holding
 real orphans, 600 chunks left by a walltime-killed bench block, 3.57 GiB. The
