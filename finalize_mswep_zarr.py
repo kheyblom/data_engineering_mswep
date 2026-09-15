@@ -97,6 +97,16 @@ ATTRS_MESSAGE = 'add provenance and discovery attributes'
 OUR_HISTORY_MARKER = 'by mswep_zarr.py'
 # icechunk's own first snapshot, which is not a commit anyone made
 INITIAL_MESSAGE = 'Repository initialized'
+# The message migrate_nomenclature.py commits its metadata rewrite under. That
+# script is temporary and will be deleted, but the commits it made are in the
+# stores' history for good, so this constant has to outlive it: without it those
+# commits would be counted as build commits and date_created would jump forward
+# to the day of the migration every time --attrs was re-run.
+MIGRATE_MESSAGE = 'align with the nomenclature key'
+
+# commits that are not part of building the store, and so do not count towards
+# the commit count or the build's start and end dates
+NON_BUILD_MESSAGES = (INITIAL_MESSAGE, ATTRS_MESSAGE, MIGRATE_MESSAGE)
 
 
 def parse_args():
@@ -247,14 +257,11 @@ def build_history(repository, settings, evidence, current):
             upstream history to preserve, or None if there is nothing to keep.
     """
     # ancestry yields newest first; the initial snapshot is the oldest.
-    # Finalization commits are excluded: they are not part of the build, and
-    # counting them would move the commit count and date_created on every
-    # re-run of --attrs
+    # Finalization and migration commits are excluded: they are not part of the
+    # build, and counting them would move the commit count and date_created on
+    # every re-run of --attrs
     snapshots = list(repository.ancestry(branch=BRANCH))
-    built = [
-        s for s in snapshots
-        if s.message not in (INITIAL_MESSAGE, ATTRS_MESSAGE)
-    ]
+    built = [s for s in snapshots if s.message not in NON_BUILD_MESSAGES]
     first, last = built[-1], built[0]
     started = first.written_at.astimezone(datetime.timezone.utc)
     finished = last.written_at.astimezone(datetime.timezone.utc)
