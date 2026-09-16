@@ -69,11 +69,44 @@ num_workers: 4
 file_cache_maxsize: 32
 chunk_cache_size_mib: 32
 
-# a minimal attrs section, so a tiny run exercises the same attribute path the
-# production build and finalize_mswep_zarr.py use rather than skipping it
+# The full attribute set the verifier requires, so a tiny run exercises the same
+# attribute path the production build and finalize_mswep_zarr.py use and can
+# actually pass. It carried only a title before, which meant the fixture failed
+# the required-attributes check on every run it was ever put through.
 attrs:
   title: 'TEST STORE -- MSWEP {version_label} {temporal_resolution}, staged subset, not for use'
   Conventions: ACDD-1.3
+  summary: >-
+    A correctness fixture, NOT data. One staged year of MSWEP {version_label}
+    {period} on the native 0.1 degree grid, built to exercise the same code path
+    as a production store at a cost of minutes.
+  source: >-
+    MSWEP {version_label} {period} {temporal_resolution} netCDF files, one file
+    per day, reached through a staged tree of symlinks into the real raw data
+  references: >-
+    http://www.gloh2o.org/mswep/ -- see the production configs for the full
+    citation; this store is not for use and carries the link only so the
+    attribute path is exercised
+  product_caveat: >-
+    DO NOT USE. This is a test fixture covering one year of a staged subset, and
+    it deliberately omits 1979-07-01, which is NOT a real MSWEP gap. The
+    production stores are the ones to read.
+  known_data_gaps: >-
+    1979-07-01 is absent by construction: the staging script leaves it out so the
+    fixture exercises the gap splice and the coverage guard, which the production
+    configs only reach on two days out of 16,982. It is written as an entirely
+    fill (NaN) plane, so the spatial layout holds one fewer chunk than it has
+    timesteps and that is correct.
+  chunking: >-
+    Chunked (time, lat, lon) = (1, 1800, 3600), float32, zstd: one whole global
+    map per chunk, as the production spatial stores are. For the opposite access
+    pattern read the sibling fixture
+    tiny_temporal/mswep.{version}.{period}.{frequency}.{grid_name}.{variable}.zarr.
+  related_store: >-
+    One sibling fixture holds the same staged year in the opposite layout:
+    tiny_temporal/mswep.{version}.{period}.{frequency}.{grid_name}.{variable}.zarr.
+    Neither is derived from the other; both are built from the staged files and
+    verified against them independently, as the production stores are.
   comment: >-
     Built from config_zarr_tiny_spatial.yaml against a staged tree of one year
     with one day removed. A correctness fixture, not data.

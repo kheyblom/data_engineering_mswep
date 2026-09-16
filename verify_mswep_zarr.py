@@ -565,12 +565,27 @@ def check_nomenclature(report, dataset, settings, name, layout):
         and stem.endswith(f'.{entry.canonical}.zarr'),
         stem,
     )
-    # a temporal store filed under spatial/ would read correctly and be found by
-    # everyone looking in the wrong place
+    # Two checks, because the directory has two jobs. It has to be where the
+    # config says, and it has to name the layout the chunking actually is: a
+    # temporal store filed under a spatial directory would read correctly and be
+    # found by everyone looking in the wrong place.
+    #
+    # The layout token is looked for *inside* the directory name rather than
+    # compared to it, because the fixture and bench configs deliberately prefix
+    # it -- 'tiny_spatial', 'bench_temporal' -- so that a mistyped path cannot
+    # resolve to a production store. 'spatial' and 'temporal' are not substrings
+    # of one another, so this still catches a genuinely misfiled store.
+    directory = os.path.basename(os.path.dirname(path))
+    suffix = settings['output_conventions']['suffix']
     report.check(
-        f'store sits in the {layout!r} layout directory',
-        os.path.basename(os.path.dirname(path)) == layout,
-        f'{os.path.basename(os.path.dirname(path))!r}',
+        f'store sits in the {suffix!r} directory the config names',
+        directory == suffix,
+        f'{directory!r}',
+    )
+    report.check(
+        f'that directory names the {layout!r} layout',
+        layout in directory,
+        f'{directory!r}',
     )
 
 
