@@ -66,10 +66,11 @@ manifest, the storage statistics and every array's shape, chunks, dtype and fill
 value are identical either side, so the verification above still stands and was
 not re-run. Each store carries a second tag,
 `<release>-<product>-<layout>-nomenclature-20260915`, at the migrated tip; the
-first tag is the rollback point. The pipeline itself has **not** yet been
-changed to build into this state -- that is Task 1.b in [TASKS.md](TASKS.md),
-and until it lands `finalize --attrs --apply` would revert three attributes.
-See [STATE.md](STATE.md).
+first tag is the rollback point. The stores were **not** rebuilt: the pipeline
+was refactored separately (Task 1.b) so that a build from scratch lands in the
+same state, checked attribute by attribute against all eight. What has not
+happened yet is a store actually built by the refactored code -- that is Task
+1.c in [TASKS.md](TASKS.md). See [STATE.md](STATE.md).
 
 Garbage collection ran on `v_2_8.past.temporal` alone -- the only store holding
 real orphans, 600 chunks left by a walltime-killed bench block, 3.57 GiB. The

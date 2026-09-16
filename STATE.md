@@ -9,8 +9,8 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-15 (all 8 stores migrated onto the data engineering style
-guide; **task 1.a done, 1.b next**)
+Last updated: 2026-09-15 (stores migrated and the pipeline refactored to match;
+**tasks 1.a and 1.b done, 1.c next**)
 
 The original eight tasks are complete: 396 checks across the eight stores, **0
 failures**, ~630 million cells compared bit-exactly against the raw netCDF
@@ -46,36 +46,53 @@ and `<release>-<product>-<layout>-nomenclature-20260915` at the migrated tip.
 
 ## Next action
 
-**Task 1.b: make the pipeline build into this state directly.** The stores are
-migrated; the code that produced them is not. Start with:
+**Task 1.c: test the codebase refactor.** The refactor is in and checked against
+the eight live stores, but no store has been *built* by it yet. What is already
+established, and what is not:
 
-1. `config/*.yaml` -- the filename template becomes
-   `{suffix}/mswep.{version}.{period}.{frequency}.{grid_name}.{variable}.zarr`,
-   with `frequency` and `variable` resolved through `utils/nomenclature.py`
-   rather than written by hand. `migrate_nomenclature.MIGRATED_FILENAME` is the
-   string to move.
-2. `variable_attrs` -- must now set `units`, `long_name` and the `original_*`
-   provenance. It deliberately did not set `units` before.
-3. The three `attrs` entries whose prose the migration rewrote:
-   `cf_compliance`, `chunking`, `related_store`. See the hazard below.
-4. `verify_mswep_zarr.py` -- its required-global-attrs tuple, its `LAYOUT_ATTRS`
-   map and its commit-count expectation all predate the migration and do not
-   know about the new attributes or the extra commit. It was **not** run after
-   the migration, by decision; it is the first thing 1.b has to pick up.
-5. Delete `migrate_nomenclature.py` once 1.b and 1.c land. It says so itself.
+| | how it was checked |
+|---|---|
+| configs render what the stores hold | every config's `attrs` and `variable_attrs` diffed against all eight stores, byte for byte |
+| a fresh build reproduces the stores | `build_dataset` run over three real files per store, all 27-28 attributes compared; no differences |
+| the verifier's new checks bite | corrupting the key's `canonical_units` and `canonical_long_name` makes them fail, restored from git |
+| structure holds | `--phases structure` on all eight: 24 checks, 0 failures each |
+| siblings agree | `--phases metadata` on all four pairs: 0 failures |
+| finalize is idempotent again | `--attrs` reports **0 pending** on all eight |
+| **a store built from scratch** | **not done -- this is 1.c** |
 
-### Hazard: do not run `finalize --attrs --apply` until 1.b updates the configs
+So 1.c is the Tier 1 fixture, which needs raw data read and a store written and
+therefore needs the batch queue:
 
-The finalizer merges the config's `attrs` section over what the store holds, so
-against today's configs it would **revert** exactly three attributes the
-migration rewrote -- `cf_compliance`, `chunking` and `related_store` -- back to
-prose that names `daily` store paths and claims the units do not parse under
-udunits. `--status` reports this as '3 pending'; that is the stale config, not
-work left undone. Verified 2026-09-15 by dry run.
+```bash
+# the staged one-year tree of symlinks; the staging script is quoted in
+# config/config_zarr_tiny_spatial.yaml and the tree is already on disk
+QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=00:30:00 \
+    CONFIG=config/config_zarr_tiny_spatial.yaml ./submit_mswep_zarr.sh
+VERIFY=1 CONFIG=config/config_zarr_tiny_spatial.yaml ./submit_mswep_zarr.sh
+# then the same for config_zarr_tiny_temporal.yaml, which exercises the region path
+```
 
-Likewise **do not run `--gc --apply`** on any store yet. It is irreversible and
-would discard the snapshot the `...-verified-20260914` tag makes the rollback
-point.
+Show the user the submission and wait for approval -- jobs cost core-hours.
+
+Two clean-ups that belong to 1.c, not before it:
+
+- **Delete the two pre-guide fixture stores** once the rebuild has produced
+  their replacements:
+  `mswep_tiny/v_3_16/zarr/mswep.v_3_16.past.daily.native_0p1x0p1.tiny_{spatial,temporal}.zarr`.
+  They were deliberately left un-migrated: rebuilding them from raw is the test,
+  and migrating them first would have destroyed the evidence.
+- **Delete `migrate_nomenclature.py`.** It says so itself. `NON_BUILD_MESSAGES`
+  in `finalize_mswep_zarr.py` must stay behind, because the commits it made
+  outlive it.
+
+### Still do not run `--gc --apply`
+
+Irreversible, and it would discard the snapshot the `...-verified-20260914` tag
+makes the rollback point for the migration. Wait until 1.c has passed.
+
+The `finalize --attrs` hazard recorded here on 2026-09-15 is **cleared**: the
+configs no longer carry `cf_compliance`, which is derived now, and `--status`
+reports 0 pending on all eight.
 
 If the record is refreshed later, the cycle is:
 
@@ -97,6 +114,22 @@ but collecting them frees **0.00 GiB**, and it was deliberately not run. Do not
 read it as work left undone.
 
 ## Decisions made
+
+- **2026-09-15, the nomenclature prose is derived in code, not written in the
+  configs (task 1.b).** `cf_compliance`, `nomenclature` and `dtype_note` are
+  built by `zarr_utils.nomenclature_attrs` and were removed from every config.
+  Against the project's usual rule that prose belongs in the config, and for two
+  reasons that outweigh it: `cf_compliance` depends on which unit spelling a
+  particular product publishes, so it is genuinely derived from the data; and
+  all three have to be *identical* across the collection for the stores to be
+  comparable, while eight YAML copies are eight chances to drift. The migration
+  script imports the same strings, which is what makes a migrated store and a
+  freshly built one word every attribute the same way.
+
+- **2026-09-15, `variables: all` removed.** The style guide requires one store
+  per data variable, and the store's path now carries the variable, which is
+  resolved before any file is opened. A config therefore names one `variable`,
+  spelled as MSWEP publishes it, and the canonical name comes from the key.
 
 - **2026-09-15, style guide alignment migrated in place, not rebuilt (task
   1.a).** Every gap between the built stores and the data engineering style
@@ -249,6 +282,28 @@ Measured 2026-09-13; see CLAUDE.md for the full input-data section.
 - Days present: 1979-01-01 through 2025-06-29, less the two 1993 days above.
 
 ## Work log
+
+### 2026-09-15 — Task 1.b, pipeline refactor
+
+- Rewrote all 14 configs: the layout-directory filename template, one named
+  `variable`, `cf_compliance` dropped, `long_name` dropped from `variable_attrs`,
+  and every sibling store name in `chunking` and `related_store` re-pointed.
+- Added `apply_nomenclature` and `nomenclature_attrs` to `zarr_utils`, applied
+  last in `build_dataset` so the key beats the config, and wired the same
+  strings into `migrate_nomenclature.py` so the two paths cannot diverge.
+- `finalize_mswep_zarr.py` re-derives the nomenclature attributes, so a store
+  built before they existed picks them up from a plain `--attrs` run. That is
+  what took the pending count from 3 to 0 on all eight.
+- `verify_mswep_zarr.py` gained `check_nomenclature`, eleven checks read from
+  the key file rather than from literals, and now translates the store's
+  canonical name back to MSWEP's own before reading raw.
+- Found and fixed a latent verifier bug: `known_data_gaps` legitimately differs
+  between the two layouts and was not in `LAYOUT_ATTRS`, so the `metadata` phase
+  failed on both Past pairs. That phase is not run by default, which is why it
+  had never been seen.
+- Corrected an earlier note in this file: the verifier's commit-count check is
+  a **floor** (`>= expected`, with a comment saying finalization legitimately
+  adds commits), so the migration's extra commit never threatened it.
 
 ### 2026-09-15 — Task 1.a, style guide alignment
 

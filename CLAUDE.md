@@ -412,8 +412,10 @@ spent once.
   release's read profile predicts the other's.
 - **The raw tree is `raw/<product>/<year>/` with one file per day**, not
   `raw/<resolution>/<variable>/` with one file per year. Path construction,
-  variable discovery and the `variables: all` shorthand all have to be rethought
-  rather than ported. A year directory sits between the product and the files
+  variable discovery all have to be rethought rather than ported. The
+  `variables: all` shorthand this project started with is gone: the style guide
+  requires one store per variable, so a config names its one `variable` and the
+  store path is built from it before a file is opened. A year directory sits between the product and the files
   because 15,000+ entries in one directory is above what GLADE is happy with.
 
 ## Layout
