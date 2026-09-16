@@ -68,9 +68,11 @@ not re-run. Each store carries a second tag,
 `<release>-<product>-<layout>-nomenclature-20260915`, at the migrated tip; the
 first tag is the rollback point. The stores were **not** rebuilt: the pipeline
 was refactored separately (Task 1.b) so that a build from scratch lands in the
-same state, checked attribute by attribute against all eight. What has not
-happened yet is a store actually built by the refactored code -- that is Task
-1.c in [TASKS.md](TASKS.md). See [STATE.md](STATE.md).
+same state, checked attribute by attribute against all eight. The refactored
+code was then tested end to end from raw on the one-year fixture, on both write
+paths: **60 and 64 checks, 0 failures**, and identical shape, chunking, dtype and
+chunk occupancy against fixtures built by the pre-refactor code. See
+[TESTING.md](TESTING.md) and [STATE.md](STATE.md).
 
 Garbage collection ran on `v_2_8.past.temporal` alone -- the only store holding
 real orphans, 600 chunks left by a walltime-killed bench block, 3.57 GiB. The

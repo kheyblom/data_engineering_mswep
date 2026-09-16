@@ -84,8 +84,9 @@ What the guide costs this project, all of it settled 2026-09-15:
 ### Migrating a built store rather than rebuilding it
 
 `migrate_nomenclature.py` did this once, for the eight stores built before the
-guide, and is **temporary** -- delete it once the pipeline refactor and its
-tests land. Three findings from it are worth keeping:
+guide, and has since been **deleted** -- it was temporary by design. It is in the
+history at `f657071` if a future release ever needs the same treatment. Three
+findings from it are worth keeping:
 
 - **`finalize_mswep_zarr.py --attrs` cannot migrate a store.** It opens only the
   root group, so it never touches a variable's own attributes, and it merges

@@ -7,7 +7,7 @@ I want the data store this project creates to be aligned with the new data engin
 Here are your following tasks:
 a. ~~Read @/glade/u/home/kheyblom/work/style_guides/style-guide_data_engineering.md and develop a plan on how to update the current datastores to align with the new style guide. I don't want to rerun the whole pipeline as that would be costly. Update the stores in a way that just modifies them to get the same end result. Any scripts used to make these modifications will be temporary (see below).~~ **COMPLETED 2026-09-15** -- all eight stores migrated in place by `migrate_nomenclature.py` (temporary, delete after 1.b/1.c). Metadata only, zero core-hours; chunk manifests identical either side. See STATE.md.
 b. ~~Update the codebase so that the original pipeline so that if it were ran from start to finish, it would create data stores that align with the style guide.~~ **COMPLETED 2026-09-15** -- configs, build, verifier and finalizer all refactored. A build from three real files reproduces every attribute of all eight migrated stores; `finalize --attrs` reports 0 pending. No store has been built end to end yet -- that is 1.c.
-c. Test the codebase refactor.
+c. ~~Test the codebase refactor.~~ **COMPLETED 2026-09-15** -- Tier 1 fixture built and verified on both write paths from raw: spatial 60 checks / 0 failures (148.5M cells bit-checked), temporal 64 checks / 0 failures. Against the pre-refactor fixtures the shape, chunking, dtype and chunk occupancy are identical, so the refactor changed metadata only. See TESTING.md findings 19-21.
 
 
 General notes:

@@ -9,8 +9,8 @@ Task list: [TASKS.md](TASKS.md). Design rules and inherited findings:
 
 ## Where things stand
 
-Last updated: 2026-09-15 (stores migrated and the pipeline refactored to match;
-**tasks 1.a and 1.b done, 1.c next**)
+Last updated: 2026-09-15 (**task 1 complete**: stores migrated, pipeline
+refactored to match, and the refactor tested end to end from raw)
 
 The original eight tasks are complete: 396 checks across the eight stores, **0
 failures**, ~630 million cells compared bit-exactly against the raw netCDF
@@ -46,53 +46,45 @@ and `<release>-<product>-<layout>-nomenclature-20260915` at the migrated tip.
 
 ## Next action
 
-**Task 1.c: test the codebase refactor.** The refactor is in and checked against
-the eight live stores, but no store has been *built* by it yet. What is already
-established, and what is not:
+**Nothing outstanding on task 1.** All three parts are done:
 
-| | how it was checked |
-|---|---|
-| configs render what the stores hold | every config's `attrs` and `variable_attrs` diffed against all eight stores, byte for byte |
-| a fresh build reproduces the stores | `build_dataset` run over three real files per store, all 27-28 attributes compared; no differences |
-| the verifier's new checks bite | corrupting the key's `canonical_units` and `canonical_long_name` makes them fail, restored from git |
-| structure holds | `--phases structure` on all eight: 24 checks, 0 failures each |
-| siblings agree | `--phases metadata` on all four pairs: 0 failures |
-| finalize is idempotent again | `--attrs` reports **0 pending** on all eight |
-| **a store built from scratch** | **not done -- this is 1.c** |
+- **1.a** -- eight stores migrated in place onto the style guide, metadata only,
+  zero core-hours, chunk manifests identical either side.
+- **1.b** -- configs, build, verifier and finalizer refactored so a build from
+  scratch lands in that state.
+- **1.c** -- the Tier 1 fixture built and verified from raw on both write paths:
 
-So 1.c is the Tier 1 fixture, which needs raw data read and a store written and
-therefore needs the batch queue:
+| | spatial (append) | temporal (region) |
+|---|---|---|
+| build | 365 steps, 4 batches | 9 blocks of 1.05 GiB |
+| verify | **60 checks, 0 failures** | **64 checks, 0 failures** |
+| cells bit-checked against raw | 148,522,500 | 3,348,800 |
+| chunks | 364, 1 absent (the fixture's removed day) | 16,151 (49 corner tiles absent) |
 
-```bash
-# the staged one-year tree of symlinks; the staging script is quoted in
-# config/config_zarr_tiny_spatial.yaml and the tree is already on disk
-QUEUE=develop NCPUS=4 MEM=16GB WALLTIME=00:30:00 \
-    CONFIG=config/config_zarr_tiny_spatial.yaml ./submit_mswep_zarr.sh
-VERIFY=1 CONFIG=config/config_zarr_tiny_spatial.yaml ./submit_mswep_zarr.sh
-# then the same for config_zarr_tiny_temporal.yaml, which exercises the region path
+Against the pre-refactor fixtures the shape, chunk shape, dtype and chunk
+occupancy are identical and nothing was removed from any attribute set, so the
+refactor changed metadata and only metadata. `migrate_nomenclature.py` has been
+deleted as it always said it would be; `NON_BUILD_MESSAGES` in
+`finalize_mswep_zarr.py` stays, because the commits it made outlive it.
+
+### One optional clean-up left, needs the user
+
+The two **pre-guide fixture stores** are still on disk under the old naming:
+
+```
+mswep_tiny/v_3_16/zarr/mswep.v_3_16.past.daily.native_0p1x0p1.tiny_{spatial,temporal}.zarr
 ```
 
-Show the user the submission and wait for approval -- jobs cost core-hours.
-
-Two clean-ups that belong to 1.c, not before it:
-
-- **Delete the two pre-guide fixture stores** once the rebuild has produced
-  their replacements:
-  `mswep_tiny/v_3_16/zarr/mswep.v_3_16.past.daily.native_0p1x0p1.tiny_{spatial,temporal}.zarr`.
-  They were deliberately left un-migrated: rebuilding them from raw is the test,
-  and migrating them first would have destroyed the evidence.
-- **Delete `migrate_nomenclature.py`.** It says so itself. `NON_BUILD_MESSAGES`
-  in `finalize_mswep_zarr.py` must stay behind, because the commits it made
-  outlive it.
+They were deliberately not migrated so they could serve as the control for
+TESTING.md finding 21, and that comparison has now been made and recorded. They
+are ~3.6 GiB of scratch carrying store names that violate the naming convention.
+Delete them, or keep them as a re-runnable control -- the user's call.
 
 ### Still do not run `--gc --apply`
 
 Irreversible, and it would discard the snapshot the `...-verified-20260914` tag
-makes the rollback point for the migration. Wait until 1.c has passed.
-
-The `finalize --attrs` hazard recorded here on 2026-09-15 is **cleared**: the
-configs no longer carry `cf_compliance`, which is derived now, and `--status`
-reports 0 pending on all eight.
+makes the rollback point for the migration. The four spatial stores will keep
+offering it; collecting them frees 0.00 GiB.
 
 If the record is refreshed later, the cycle is:
 
@@ -282,6 +274,20 @@ Measured 2026-09-13; see CLAUDE.md for the full input-data section.
 - Days present: 1979-01-01 through 2025-06-29, less the two 1993 days above.
 
 ## Work log
+
+### 2026-09-15 — Task 1.c, testing the refactor
+
+- Four develop-queue jobs, twice: build and verify the one-year fixture on both
+  write paths (7482200/01/02/04, then 7482277/78/79/80).
+- The first run's builds were clean and its verifiers failed on two checks,
+  neither about data. One was mine -- the layout check did not understand why
+  the fixture sits in `tiny_spatial/`. The other was **pre-existing**: the
+  fixture configs carried almost no attributes and had failed the
+  required-attributes check on every run since they were written, five times in
+  the log. Both fixed, both fixtures given the full attribute set.
+- The rerun is green on all four. Details and the control comparison are
+  TESTING.md findings 19-21.
+- Deleted `migrate_nomenclature.py`; it is at `f657071` if ever needed again.
 
 ### 2026-09-15 — Task 1.b, pipeline refactor
 
