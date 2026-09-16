@@ -668,3 +668,28 @@ the comparison is not re-runnable: reproducing it would mean checking out
 is the trade deliberately taken -- the result above is the evidence, and leaving
 3.8 GiB of stores whose names violate the naming convention sitting in the tree
 is its own kind of hazard.
+
+### 22. A fixture store left on disk turns the next fixture run into a no-op
+
+Both write paths resume rather than rebuild, which is the whole point of them
+and exactly wrong for a test. Run the Tier 1 fixture against a store that is
+already complete and the append path's `committed_timesteps` returns the full
+365, `write_append` logs 'store is already complete, nothing to write' and
+returns; the region path's `committed_blocks` finds all nine and
+`write_by_region` does the same. Both exit 0.
+
+Nothing is written, and **nothing is written includes the attributes**: they are
+laid down by the first batch on the append path and by `create_skeleton` on the
+region path, so a config change that only touches metadata cannot reach a store
+that already exists. The verifier then runs against the *old* store and reports
+whatever it reported last time.
+
+This cost a full cycle on 2026-09-15. The fixture configs were corrected to
+carry the attributes the verifier requires, the fixture was rebuilt, and the
+verifier failed on exactly the same missing attributes, because the build had
+found the store complete and returned without touching it.
+
+**Delete the fixture store before re-running the fixture.** The Tier 1 sequence
+is delete, build, verify -- not build, verify. This is not a defect in the
+resume logic, which is load-bearing for the production builds; it is what makes
+a fixture store worth deleting as soon as it has been read.

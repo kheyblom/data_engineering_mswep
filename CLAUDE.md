@@ -81,6 +81,15 @@ What the guide costs this project, all of it settled 2026-09-15:
   rejected. The guide requires any deviation to be approved; these were, on
   2026-09-15. Do not add a third without asking.
 
+### Re-running the Tier 1 fixture
+
+**Delete the fixture store first.** Both write paths resume rather than rebuild,
+so a fixture store that is already complete makes the build a no-op that exits
+0 and writes nothing -- including the attributes, which are laid down only by
+the first batch or by `create_skeleton`. The verifier then audits the old store
+and reports what it reported last time. The sequence is delete, build, verify.
+See TESTING.md finding 22, which cost a cycle to learn.
+
 ### Migrating a built store rather than rebuilding it
 
 `migrate_nomenclature.py` did this once, for the eight stores built before the
