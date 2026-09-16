@@ -66,9 +66,15 @@ from utils.path_utils import (
     file_naming,
     format_attrs,
     load_config,
+    product_parts,
     store_path,
 )
-from utils.zarr_utils import BRANCH, derive_attrs, open_existing_repository
+from utils.zarr_utils import (
+    BRANCH,
+    derive_attrs,
+    nomenclature_attrs,
+    open_existing_repository,
+)
 # imported rather than restated, so the bar for 'verified' cannot drift from
 # what the verifier actually runs by default
 from verify_mswep_zarr import DEFAULT_PHASES
@@ -334,10 +340,15 @@ def resolve_attrs(repository, settings, evidence):
     """Work out the attributes the store should carry.
 
     The store's own attributes are the base, so upstream provenance survives;
-    the derived coverage and grid values go on top; the config goes on top of
-    those, so any derived value can be overridden by hand; and the derived
-    provenance goes on last, because ``verification`` must describe what the
-    verifier actually reported rather than what a config claims.
+    the derived coverage, grid and nomenclature values go on top; the config
+    goes on top of those, so any derived value can be overridden by hand; and
+    the derived provenance goes on last, because ``verification`` must describe
+    what the verifier actually reported rather than what a config claims.
+
+    The nomenclature attributes are re-derived here rather than trusted from the
+    store, so that a store built before they existed picks them up from a plain
+    ``--attrs`` run. The configs deliberately do not carry them: see
+    ``nomenclature_attrs``.
 
     Args:
         repository (icechunk.Repository): The repository holding the store.
@@ -351,7 +362,14 @@ def resolve_attrs(repository, settings, evidence):
     dataset = xr.open_zarr(session.store, consolidated=False)
     current = dict(dataset.attrs)
     duration = file_naming(settings).duration
-    merged = current | derive_attrs(dataset, duration) | format_attrs(settings)
+    _, resolution = product_parts(settings)
+    variable = sorted(dataset.data_vars)[0]
+    merged = (
+        current
+        | derive_attrs(dataset, duration)
+        | nomenclature_attrs(dataset, variable, resolution)
+        | format_attrs(settings)
+    )
     if evidence:
         merged = merged | derived_provenance(
             repository, settings, evidence, current

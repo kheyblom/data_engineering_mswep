@@ -30,6 +30,8 @@ from collections import namedtuple
 import pandas as pd
 import yaml # type: ignore
 
+from .nomenclature import canonical_frequency, canonical_variable
+
 # 'V3.16' -> '3.16', 'V2.8' -> '2.8'. A release can carry more dot separated
 # parts than the two on disk do, so the count is not fixed. Kept identical to
 # access_mswep's regex: the two projects have to spell a version the same way
@@ -222,17 +224,32 @@ def template_fields(settings):
     ``product``; nested sections are skipped because only scalars render
     usefully into a string.
 
-    ``version`` is substituted in its directory form so rendered text carries
-    the same spelling as the input tree, and ``version_label`` holds it as the
-    config writes it. ``period`` and ``temporal_resolution`` are split out of
-    ``product`` so a filename or an attribute can name either without the
-    config repeating itself.
+    Three pairs follow the same rule: the field without a suffix is the
+    *canonical* spelling, the one the store is named and labelled with, and the
+    ``_label`` field beside it is what the config and the upstream tree write.
+
+    - ``version`` is the directory form (``v_3_16``), ``version_label`` the
+      config's own (``V3.16``).
+    - ``frequency`` is the token from the nomenclature key (``day``),
+      ``temporal_resolution`` what MSWEP calls it and what names the raw
+      directory (``daily``). Both are offered because a store name needs the
+      first and a sentence about the source files needs the second.
+    - ``variable`` is the canonical name, ``variable_label`` the name MSWEP
+      publishes. They are the same string for MSWEP today, and are kept
+      separate anyway so that nothing silently depends on their being equal.
+
+    ``period`` is split out of ``product`` so a filename or an attribute can
+    name it without the config repeating itself.
 
     Args:
         settings (dict): The loaded configuration.
 
     Returns:
         dict: Field name -> value.
+
+    Raises:
+        KeyError: If the config names no ``variable``, or names one the
+            nomenclature key has no row for.
     """
     fields = {
         key: value
@@ -249,6 +266,16 @@ def template_fields(settings):
     fields['product'] = format_product(settings)
     fields['period'] = period
     fields['temporal_resolution'] = resolution
+    fields['frequency'] = canonical_frequency(resolution)
+
+    if 'variable' not in settings:
+        raise KeyError(
+            "config sets no 'variable'. The style guide requires one store per "
+            'data variable, so the variable is named in the config rather than '
+            'discovered, and the store cannot be named without it'
+        )
+    fields['variable_label'] = settings['variable']
+    fields['variable'] = canonical_variable(settings['variable'])
     return fields
 
 
@@ -259,7 +286,11 @@ def format_filename(settings):
         settings (dict): The loaded configuration.
 
     Returns:
-        str: e.g. 'mswep.v_3_16.past.daily.native_0p1x0p1.spatial.zarr'.
+        str: e.g.
+            'spatial/mswep.v_3_16.past.day.native_0p1x0p1.precipitation.zarr'.
+            The layout is a directory rather than a name component; see
+            nomenclature-key_mswep.md for why, and for the other deviation from
+            the style guide's filename convention.
 
     Raises:
         ValueError: If the template refers to a field the config does not
@@ -329,7 +360,7 @@ def store_path(settings):
         settings (dict): The loaded configuration.
 
     Returns:
-        str: e.g. '<download>/v_3_16/zarr/mswep.v_3_16.past.daily....spatial.zarr'.
+        str: e.g. '<download>/v_3_16/zarr/spatial/mswep.v_3_16.past.day....zarr'.
     """
     return os.path.join(version_root(settings), ZARR_DIRNAME, format_filename(settings))
 

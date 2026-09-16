@@ -88,11 +88,18 @@ import numpy as np
 import xarray as xr
 
 from utils.log_utils import setup_logging
+from utils.nomenclature import (
+    canonical_frequency,
+    canonical_variable,
+    original_variable,
+    variables as nomenclature_variables,
+)
 from utils.path_utils import (
     check_coverage,
     expected_times,
     file_naming,
     load_config,
+    product_parts,
     raw_files,
     store_path,
 )
@@ -143,6 +150,12 @@ LAYOUT_ATTRS = frozenset(
         'date_created',
         'related_store',
         'verification',
+        # whether an upstream gap leaves a hole in the array depends on the
+        # chunking, so the two layouts describe the same gap differently and
+        # both are right: in V3.16 Past the Arctic corner makes 49 tiles absent
+        # from the temporal store and no chunk at all absent from the spatial
+        # one, and the temporal config says so.
+        'known_data_gaps',
     }
 )
 
@@ -336,6 +349,11 @@ def read_raw_box(index, variable, t0, t1, lat=slice(None), lon=slice(None)):
     hyperslab from each. A timestep the release never published is returned as
     NaN, which is what the store holds there.
 
+    ``variable`` is the store's name, which is canonical; the raw files are read
+    under the name MSWEP publishes, resolved through the nomenclature key. The
+    two are the same string for MSWEP today, and the translation is done anyway
+    so that nothing here silently depends on their being equal.
+
     Args:
         index (dict): The raw index from ``build_raw_index``.
         variable (str): Variable to read.
@@ -348,6 +366,9 @@ def read_raw_box(index, variable, t0, t1, lat=slice(None), lon=slice(None)):
         numpy.ndarray: The float32 box, still holding the raw fill sentinels,
             and NaN at any timestep with no file.
     """
+    # the store carries the canonical name, the files carry MSWEP's own
+    upstream = original_variable(variable)
+
     pieces = []
     for timestep in range(t0, t1):
         path = index['paths'][timestep]
@@ -362,7 +383,7 @@ def read_raw_box(index, variable, t0, t1, lat=slice(None), lon=slice(None)):
         dataset.set_auto_mask(False)
         dataset.set_auto_scale(False)
         pieces.append(
-            np.asarray(dataset.variables[variable][0, lat, lon]).astype(np.float32)
+            np.asarray(dataset.variables[upstream][0, lat, lon]).astype(np.float32)
         )
         dataset.close()
 
@@ -465,6 +486,94 @@ def coarsen_to_tiles(plane, chunks, grid, sentinels):
     ).any(axis=(1, 3))
 
 
+def check_nomenclature(report, dataset, settings, name, layout):
+    """Check the store follows the nomenclature key, and says what it changed.
+
+    This is the style guide's core requirement, and it is checked against the
+    key file rather than against a literal here, so the store, the key and the
+    documentation cannot disagree. What MSWEP published is checked too: the
+    guide asks that a rename or a unit change be recorded, and an
+    ``original_units`` that does not match what the raw files actually carry
+    would be a false record of it.
+
+    Args:
+        report (Report): Where to record outcomes.
+        dataset (xarray.Dataset): The decoded store.
+        settings (dict): The loaded configuration.
+        name (str): The store's data variable.
+        layout (str): From ``store_layout``.
+    """
+    entry = nomenclature_variables()[settings['variable']]
+    attrs = dataset[name].attrs
+
+    report.check(
+        f'variable is the canonical {entry.canonical!r}',
+        name == canonical_variable(settings['variable']),
+        f'{name!r}',
+    )
+    for key, expected in (
+        ('units', entry.units),
+        ('long_name', entry.long_name),
+        ('original_variable_name', settings['variable']),
+    ):
+        report.check(
+            f'{name}.{key} is {expected!r}',
+            attrs.get(key) == expected,
+            f'{attrs.get(key)!r}',
+        )
+    # not compared to the key's own original_units column: MSWEP's four products
+    # do not agree on the spelling and that column can only carry one, so the
+    # store is checked against the value it claims to have preserved
+    report.check(
+        f'{name}.original_units records a units string',
+        bool(attrs.get('original_units')),
+        f'{attrs.get("original_units")!r}',
+    )
+    report.check(
+        f'{name}.unit_conversion records the conversion as {entry.unit_conversion!r}',
+        attrs.get('unit_conversion', '').startswith(entry.unit_conversion),
+        f'{attrs.get("unit_conversion")!r}',
+    )
+    # precipitation_flux is a real CF standard name and the migration and the
+    # build both leave it alone; losing it would be a silent regression
+    report.check(
+        f'{name}.standard_name survives the nomenclature step',
+        bool(attrs.get('standard_name')),
+        f'{attrs.get("standard_name")!r}',
+    )
+
+    _, resolution = product_parts(settings)
+    report.check(
+        f'temporal_frequency is the canonical {canonical_frequency(resolution)!r}',
+        dataset.attrs.get('temporal_frequency') == canonical_frequency(resolution),
+        f'{dataset.attrs.get("temporal_frequency")!r}',
+    )
+    report.check(
+        f'original_temporal_frequency records MSWEP\'s {resolution!r}',
+        dataset.attrs.get('original_temporal_frequency') == resolution,
+        f'{dataset.attrs.get("original_temporal_frequency")!r}',
+    )
+    # The store's own name has to carry the canonical spellings too, or a
+    # consumer picking a store by name gets a different answer from one reading
+    # its attributes. Checked against the key rather than against the template
+    # that built the name, which would only restate itself.
+    path = store_path(settings)
+    stem = os.path.basename(path)
+    report.check(
+        f'store name carries the canonical frequency and variable',
+        f'.{canonical_frequency(resolution)}.' in stem
+        and stem.endswith(f'.{entry.canonical}.zarr'),
+        stem,
+    )
+    # a temporal store filed under spatial/ would read correctly and be found by
+    # everyone looking in the wrong place
+    report.check(
+        f'store sits in the {layout!r} layout directory',
+        os.path.basename(os.path.dirname(path)) == layout,
+        f'{os.path.basename(os.path.dirname(path))!r}',
+    )
+
+
 def check_structure(report, dataset, settings, chunks, layout):
     """Check the store's shape, encoding and attributes, without reading data.
 
@@ -512,6 +621,8 @@ def check_structure(report, dataset, settings, chunks, layout):
         )
         report.note(f'{name} codecs: {array.encoding.get("compressors", "unset")}')
 
+    check_nomenclature(report, dataset, settings, variables[0], layout)
+
     # lat and lon are read whole by anything that opens the store, so they must
     # not inherit the data's chunking.
     for name in ('lat', 'lon'):
@@ -549,6 +660,12 @@ def check_structure(report, dataset, settings, chunks, layout):
         'title', 'summary', 'Conventions', 'source', 'references',
         'chunking', 'related_store', 'known_data_gaps', 'product_caveat',
         'time_coverage_start', 'time_coverage_end', 'time_coverage_resolution',
+        # the style guide's nomenclature and dtype record, and the three fields
+        # it requires outright. history/date_created/verification are written by
+        # finalize_mswep_zarr.py, so they are checked separately below rather
+        # than demanded here -- an unfinalized store is not yet wrong
+        'cf_compliance', 'nomenclature', 'dtype_note',
+        'temporal_frequency', 'original_temporal_frequency',
     )
     absent = [a for a in required if a not in dataset.attrs]
     report.check(

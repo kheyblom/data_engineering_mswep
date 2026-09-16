@@ -2,7 +2,14 @@ directories:
   download: /glade/derecho/scratch/kheyblom/data/mswep/
   logs: ./logs
 output_conventions:
-  filename: mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+  # <layout>/<source>.<version>.<product>.<frequency>.<grid>.<variable>.zarr.
+  # The layout is a directory and the product is its own component; both are
+  # departures from the style guide's five component filename, both approved,
+  # and both written up in nomenclature-key_mswep.md. {frequency} and
+  # {variable} are the canonical spellings, resolved through that key rather
+  # than written here -- {temporal_resolution} stays MSWEP's own 'daily' and
+  # names the raw directory.
+  filename: '{suffix}/mswep.{version}.{period}.{frequency}.{grid_name}.{variable}.zarr'
   suffix: spatial
 log_file: mswep_zarr_v3_16_nrt_spatial.log
 version: V3.16
@@ -10,7 +17,11 @@ version: V3.16
 # same data, so they get separate stores rather than being merged: the period is
 # carried in the store name and they can never resolve to the same filename.
 product: NRT/Daily
-variables: all
+# The variable as MSWEP publishes it. Named rather than discovered: the style
+# guide requires one store per data variable, and the store's own path carries
+# the variable, which is resolved before a file is opened. The canonical name
+# comes from nomenclature-key_mswep.md.
+variable: precipitation
 grid_name: native_0p1x0p1
 
 # NRT is complete over its own span, 2024-10-30 to 2026-09-13: 684 files on a
@@ -67,15 +78,10 @@ attrs:
     of cells are identical; the difference is small in the mean but not
     negligible cell by cell. This store exists to carry the record past the end
     of the Past product, not to replace it.
-  # ACDD rather than CF, deliberately: see cf_compliance
+  # Conventions is ACDD-1.3 and cf_compliance is NOT set here: it depends on
+  # the unit spelling this particular product publishes, so nomenclature_attrs
+  # derives it from the data and the same text reaches every store.
   Conventions: ACDD-1.3
-  cf_compliance: >-
-    Not CF compliant. The variable's units are carried through unaltered from
-    the upstream MSWEP netCDF files, spelled 'mm/d', which udunits does not
-    parse; the upstream files carry no standard_name and no long_name at all.
-    Correcting the units would mean diverging from upstream, so they are left
-    as published and the descriptive names are supplied through variable_attrs
-    instead.
   source: >-
     MSWEP {version_label} {period} {temporal_resolution} netCDF files, one file
     per day, downloaded from the GloH2O Google Drive distribution by
@@ -91,15 +97,15 @@ attrs:
     map per chunk, 24.7 MiB. Built for reading maps and fields. A point time
     series is the worst case for this layout, touching every chunk of the
     variable; for that access pattern read the sibling
-    mswep.{version}.{period}.{temporal_resolution}.{grid_name}.temporal.zarr
+    temporal/mswep.{version}.{period}.{frequency}.{grid_name}.{variable}.zarr
     instead, which holds the same data chunked along time.
   related_store: >-
     Three siblings hold the same variable on the same grid. Same product, other
-    layout: mswep.{version}.nrt.{temporal_resolution}.{grid_name}.temporal.zarr,
+    layout: temporal/mswep.{version}.nrt.{frequency}.{grid_name}.{variable}.zarr,
     chunked one tile through the whole record per chunk. The gauge-corrected
     Past product, which should be preferred wherever it overlaps this one:
-    mswep.{version}.past.{temporal_resolution}.{grid_name}.spatial.zarr and
-    mswep.{version}.past.{temporal_resolution}.{grid_name}.temporal.zarr, which
+    spatial/mswep.{version}.past.{frequency}.{grid_name}.{variable}.zarr and
+    temporal/mswep.{version}.past.{frequency}.{grid_name}.{variable}.zarr, which
     cover 1979-01-01 to 2025-06-29. Every store is built from and verified
     against the raw files independently rather than derived from another.
   known_data_gaps: >-
@@ -111,11 +117,15 @@ attrs:
 # Attributes to put on the data variables themselves. MSWEP's files carry only
 # 'units' and 'least_significant_digit', with no long_name and no standard_name,
 # so unlike GLEAM there is a real gap here rather than upstream metadata to
-# preserve. Anything set here goes on top of what the files carry; 'units' is
-# deliberately not overridden, so the upstream spelling survives.
+# preserve. Anything set here goes on top of what the files carry.
+#
+# 'units' and 'long_name' are NOT set here. They come from the nomenclature key,
+# applied last by apply_nomenclature so a config cannot override the key, with
+# the spellings MSWEP published kept beside them as original_units and
+# original_variable_name. 'standard_name' is set here and is deliberately left
+# alone by that step: precipitation_flux is a genuine CF standard name.
 variable_attrs:
   precipitation:
-    long_name: Precipitation
     # a genuine CF standard name, unlike the units; the quantity is a flux even
     # though it is published in mm/d rather than the canonical kg m-2 s-1
     standard_name: precipitation_flux

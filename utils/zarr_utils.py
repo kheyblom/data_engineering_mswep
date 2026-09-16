@@ -54,6 +54,15 @@ import xarray as xr
 import icechunk
 from icechunk.xarray import to_icechunk
 
+from .nomenclature import (
+    canonical_frequency,
+    canonical_variable,
+    key_path,
+    # aliased: 'variables' is a parameter name in iter_blocks, and a module
+    # level import under the same name would be shadowed there
+    variables as nomenclature_variables,
+)
+
 LOG = logging.getLogger(__name__)
 
 # timesteps written per commit when the config does not say otherwise; small
@@ -77,6 +86,30 @@ DEFAULT_CHUNK_CACHE_SLOTS = 2003
 
 # branch every commit is written to
 BRANCH = 'main'
+
+# Prose recording the nomenclature the stores follow. Held here rather than in
+# each config because it is identical across the collection and describes what
+# this pipeline does rather than what the dataset is; eight copies in YAML would
+# be eight chances to drift, and the migration of the pre-guide stores writes the
+# same strings by importing them from here.
+NOMENCLATURE_NOTE = (
+    'Variable names, units and long names follow the internal data engineering '
+    'nomenclature (nomenclature_data.md). The full original -> canonical '
+    'mapping for this dataset, including the unit conversion, is '
+    'nomenclature-key_mswep.md in the data_engineering_mswep repository. The '
+    'variable name needed no translation -- MSWEP already calls it '
+    'precipitation. The strings MSWEP published are preserved on the variable '
+    'itself as original_variable_name and original_units; the upstream spelling '
+    'of the temporal frequency is kept as original_temporal_frequency.'
+)
+
+DTYPE_NOTE = (
+    'The data variable is float32, the dtype MSWEP publishes; it is not reduced '
+    'or widened anywhere in this pipeline. The lat and lon coordinates are '
+    'float32 as published, and time is stored as int64 days since 1900-01-01. '
+    "Nothing in this store is float64, so the style guide's request that "
+    'float64 be flagged for possible precision reduction does not apply here.'
+)
 
 # how a store is filled. 'append' extends the time axis batch by batch; 'region'
 # lays down a skeleton and fills it block by block. See the module docstring.
@@ -293,39 +326,170 @@ def _open_mfdataset(files, chunks):
     )
 
 
-def discover_variables(dataset, requested):
-    """Return the variables to write, expanding the ``all`` shorthand.
+def resolve_variables(dataset, settings):
+    """Return the variables to write: exactly the one the config names.
 
-    Unlike GLEAM, where each variable was its own directory of files, MSWEP
-    carries its variables inside the file, so this is resolved against an open
-    dataset rather than against the tree.
+    The style guide requires one store per data variable, so this no longer
+    expands an ``all`` shorthand. The config names the variable as MSWEP
+    publishes it, and it has to be named rather than discovered because the
+    store's path carries it and is built before a file is opened.
+
+    A list is returned rather than a bare name because the region write path
+    iterates blocks variable-major, and that ordering should keep working if a
+    future product ever holds more than one.
 
     Args:
         dataset (xarray.Dataset): A dataset opened from the raw files.
-        requested: ``'all'``, or a list of variable names from the config.
+        settings (dict): The loaded configuration; ``variable`` names it.
 
     Returns:
-        list: The variable names to write, in a stable order.
+        list: The one variable name, as it is spelled in the raw files.
 
     Raises:
-        ValueError: If a requested variable is not in the files, or the files
-            hold no data variables at all.
+        ValueError: If the named variable is not in the files.
     """
+    requested = settings['variable']
     available = sorted(dataset.data_vars)
-    if isinstance(requested, str) and requested == 'all':
-        variables = available
-    else:
-        missing = [name for name in requested if name not in available]
-        if missing:
-            raise ValueError(
-                f'variables {missing} are not in the raw files; '
-                f'available: {available}'
-            )
-        variables = list(requested)
+    if requested not in available:
+        raise ValueError(
+            f'config names variable {requested!r}, which is not in the raw '
+            f'files; available: {available}'
+        )
+    return [requested]
 
-    if not variables:
-        raise ValueError('the raw files hold no data variables')
-    return variables
+
+def unit_conversion_note(entry, upstream_units):
+    """How the canonical units were reached from what upstream published.
+
+    Args:
+        entry (nomenclature.Variable): The variable's row in the key.
+        upstream_units (str): The units string the source files carry.
+
+    Returns:
+        str: The ``unit_conversion`` attribute's value.
+    """
+    if upstream_units == entry.units:
+        return (
+            f'{entry.unit_conversion} -- this product already published the '
+            f'canonical spelling {entry.units!r}; no value was changed'
+        )
+    return (
+        f'{entry.unit_conversion} -- {upstream_units!r} and {entry.units!r} '
+        f'are the same unit under a different spelling; no value was changed'
+    )
+
+
+def cf_compliance(original_units, canonical_units):
+    """The ``cf_compliance`` note describing where the store sits against CF.
+
+    Args:
+        original_units (str): What MSWEP published for this product.
+        canonical_units (str): The canonical spelling on the variable.
+
+    Returns:
+        str: The note.
+    """
+    if original_units == canonical_units:
+        provenance = (
+            'this product already published it that way, unlike the others in '
+            'this collection'
+        )
+    else:
+        provenance = f'unlike the {original_units!r} MSWEP publishes in this product'
+    return (
+        f'Not declared CF compliant: Conventions is ACDD-1.3, which is what the '
+        f'global attributes follow. The variable itself is close. standard_name '
+        f"is a genuine CF standard name, 'precipitation_flux'. The canonical "
+        f'unit spelling {canonical_units!r} does parse under udunits, '
+        f'{provenance}. long_name follows the internal data engineering '
+        f'nomenclature key rather than a CF phrasing. What MSWEP published is '
+        f'preserved on the variable as original_variable_name and original_units.'
+    )
+
+
+def apply_nomenclature(dataset, original):
+    """Put the variable onto the canonical name, units and long name.
+
+    This is the style guide's core requirement and it runs *last* of the
+    attribute steps, so it is authoritative: a config cannot quietly override
+    the nomenclature key. What MSWEP published is not discarded but recorded
+    beside it as ``original_variable_name`` and ``original_units``, read off the
+    data rather than out of the key, because MSWEP's four products do not agree
+    on the unit spelling and the key's single column can only carry one.
+
+    ``standard_name`` is deliberately untouched. ``precipitation_flux`` is a
+    genuine CF standard name, unlike GLEAM's canonical names, so overwriting it
+    with the canonical variable name would trade real information for a
+    duplicate of the variable name.
+
+    No value is converted. Every ``unit_conversion`` in the key is ``none``;
+    ``mm/d`` and ``mm d-1`` are the same unit spelled two ways.
+
+    Args:
+        dataset (xarray.Dataset): The dataset about to be written.
+        original (str): The variable as MSWEP publishes it.
+
+    Returns:
+        tuple: The dataset, renamed if the canonical name differs, and the
+            canonical name.
+
+    Raises:
+        KeyError: If the variable has no row in the nomenclature key.
+    """
+    canonical = canonical_variable(original)
+    entry = nomenclature_variables()[original]
+
+    attrs = dict(dataset[original].attrs)
+    upstream_units = attrs.get('units', '')
+    attrs.update(
+        {
+            'long_name': entry.long_name,
+            'units': entry.units,
+            'original_variable_name': original,
+            'original_units': upstream_units,
+            'unit_conversion': unit_conversion_note(entry, upstream_units),
+        }
+    )
+    dataset[original].attrs = attrs
+
+    if canonical != original:
+        dataset = dataset.rename({original: canonical})
+        LOG.info(f'renamed {original} to the canonical {canonical}')
+    LOG.info(
+        f'{canonical}: units {upstream_units!r} -> {entry.units!r}, '
+        f'long_name {entry.long_name!r} (key {key_path()})'
+    )
+    return dataset, canonical
+
+
+def nomenclature_attrs(dataset, name, resolution):
+    """Global attributes that record the nomenclature the store follows.
+
+    Derived rather than written in the configs, for the same reason
+    ``derive_attrs`` is: eight configs carrying the same paragraph is eight
+    chances for one of them to drift, and these have to be identical across the
+    collection for the stores to be comparable.
+
+    Args:
+        dataset (xarray.Dataset): The dataset being written or inspected, with
+            ``apply_nomenclature`` already applied.
+        name (str): The data variable's canonical name.
+        resolution (str): The temporal resolution as MSWEP spells it, e.g.
+            'daily'.
+
+    Returns:
+        dict: The nomenclature, dtype, CF and frequency attributes.
+    """
+    attrs = dataset[name].attrs
+    return {
+        'cf_compliance': cf_compliance(
+            attrs.get('original_units', ''), attrs.get('units', '')
+        ),
+        'nomenclature': NOMENCLATURE_NOTE,
+        'dtype_note': DTYPE_NOTE,
+        'temporal_frequency': canonical_frequency(resolution),
+        'original_temporal_frequency': resolution,
+    }
 
 
 def fill_missing_times(dataset, expected):

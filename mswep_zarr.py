@@ -10,8 +10,14 @@ store named after ``output_conventions.filename``, next to ``raw`` in the same
 version tree.
 
 Everything is driven by the config: ``version``, ``product`` (one product per
-store), ``variables`` (a list, or ``all`` to take every variable in the files),
-and ``chunks``, where -1 means the whole dimension.
+store), ``variable`` (one per store, as the style guide requires, named as MSWEP
+publishes it), and ``chunks``, where -1 means the whole dimension.
+
+The store is named, and the variable inside it labelled, in the canonical
+nomenclature of ``nomenclature-key_mswep.md``: the frequency token ``day``
+rather than MSWEP's ``daily``, and units ``mm d-1`` rather than ``mm/d``. Both
+are respellings and neither changes a value. What MSWEP published is kept beside
+them as ``original_*`` attributes.
 
 The time axis is discovered from the *filenames* rather than from the data --
 each name is a timestamp -- and the store is written on the complete, regularly
@@ -50,6 +56,7 @@ from utils.path_utils import (
     file_naming,
     format_attrs,
     load_config,
+    product_parts,
     raw_dir,
     raw_files,
     store_path,
@@ -59,6 +66,7 @@ from utils.log_utils import (
 )
 from utils.zarr_utils import (
     DEFAULT_WRITE_STRATEGY,
+    apply_nomenclature,
     apply_variable_attrs,
     block_read_chunks,
     build_encoding,
@@ -72,14 +80,15 @@ from utils.zarr_utils import (
     configure_runtime,
     create_skeleton,
     derive_attrs,
-    discover_variables,
     fill_missing_times,
     iter_blocks,
     mask_source_fill,
+    nomenclature_attrs,
     open_files,
     open_repository,
     resolve_block_shape,
     resolve_chunks,
+    resolve_variables,
     resolve_write_strategy,
     store_variables,
     write_by_region,
@@ -117,7 +126,7 @@ def build_dataset(settings, files, expected):
     # netCDF encoding that carries MSWEP's quantisation depth
     carry_source_encoding(dataset)
 
-    variables = discover_variables(dataset, settings['variables'])
+    variables = resolve_variables(dataset, settings)
     LOG.info(f'writing {len(variables)} variables: {variables}')
     dataset = dataset[variables]
 
@@ -146,11 +155,22 @@ def build_dataset(settings, files, expected):
 
     apply_variable_attrs(dataset, format_attrs(settings, 'variable_attrs'))
 
+    # last of the variable attribute steps, and deliberately so: the style
+    # guide's nomenclature is authoritative, so a config cannot override it. It
+    # may rename the variable, so what is written from here on is the canonical
+    # name
+    dataset, canonical = apply_nomenclature(dataset, variables[0])
+    variables = [canonical]
+
     # open_files carries the source files' own attributes over; the derived and
     # configured ones go on top of those so upstream provenance survives beside
     # them. Only the first write lays them down
     duration = file_naming(settings).duration
+    _, resolution = product_parts(settings)
     derived = derive_attrs(dataset, duration)
+    # the nomenclature the store follows, derived rather than configured so that
+    # all eight stores carry identical text and it cannot drift config by config
+    derived |= nomenclature_attrs(dataset, canonical, resolution)
     if fill_values:
         # recorded from what the build did rather than left to the prose in
         # attrs, so the store cannot claim a masking it did not apply
@@ -262,7 +282,7 @@ def main(settings):
     path = store_path(settings)
     LOG.info(
         f'building zarr store for MSWEP {settings["version"]} '
-        f'({settings["product"]}, variables: {settings["variables"]})'
+        f'({settings["product"]}, variable: {settings["variable"]})'
     )
     LOG.info(f'reading from {raw_dir(settings)}')
     LOG.info(f'writing to {path}')

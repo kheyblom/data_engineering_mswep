@@ -8,7 +8,14 @@ directories:
   download: /glade/derecho/scratch/kheyblom/data/mswep_tiny/
   logs: ./logs
 output_conventions:
-  filename: mswep.{version}.{period}.{temporal_resolution}.{grid_name}.{suffix}.zarr
+  # <layout>/<source>.<version>.<product>.<frequency>.<grid>.<variable>.zarr.
+  # The layout is a directory and the product is its own component; both are
+  # departures from the style guide's five component filename, both approved,
+  # and both written up in nomenclature-key_mswep.md. {frequency} and
+  # {variable} are the canonical spellings, resolved through that key rather
+  # than written here -- {temporal_resolution} stays MSWEP's own 'daily' and
+  # names the raw directory.
+  filename: '{suffix}/mswep.{version}.{period}.{frequency}.{grid_name}.{variable}.zarr'
   # not 'temporal': the staged tree already isolates this store by directory,
   # but a distinct name means a mistyped path cannot quietly resolve to a real
   # store
@@ -16,7 +23,11 @@ output_conventions:
 log_file: mswep_zarr_tiny_temporal.log
 version: V3.16
 product: Past/Daily
-variables: all
+# The variable as MSWEP publishes it. Named rather than discovered: the style
+# guide requires one store per data variable, and the store's own path carries
+# the variable, which is resolved before a file is opened. The canonical name
+# comes from nomenclature-key_mswep.md.
+variable: precipitation
 grid_name: native_0p1x0p1
 expected_missing_times:
   - 1979-07-01
@@ -62,5 +73,4 @@ attrs:
     with one day removed. A correctness fixture, not data.
 variable_attrs:
   precipitation:
-    long_name: Precipitation
     standard_name: precipitation_flux
