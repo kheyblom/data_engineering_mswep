@@ -67,24 +67,23 @@ refactor changed metadata and only metadata. `migrate_nomenclature.py` has been
 deleted as it always said it would be; `NON_BUILD_MESSAGES` in
 `finalize_mswep_zarr.py` stays, because the commits it made outlive it.
 
-### One optional clean-up left, needs the user
+### Clean-up: done
 
-The two **pre-guide fixture stores** are still on disk under the old naming:
+The two pre-guide fixture stores were **deleted 2026-09-16 by the user's
+decision**, 3.8 GiB of scratch, after they had served as the control for
+TESTING.md finding 21 and that comparison had been recorded. Nothing under
+`mswep_tiny/v_3_16/zarr/` now carries a pre-guide name. The comparison cannot be
+re-run without rebuilding a store with the pre-refactor code, which is at
+`f657071` and earlier; the recorded result is the evidence.
 
-```
-mswep_tiny/v_3_16/zarr/mswep.v_3_16.past.daily.native_0p1x0p1.tiny_{spatial,temporal}.zarr
-```
+### `--gc` is settled: do not run it
 
-They were deliberately not migrated so they could serve as the control for
-TESTING.md finding 21, and that comparison has now been made and recorded. They
-are ~3.6 GiB of scratch carrying store names that violate the naming convention.
-Delete them, or keep them as a re-runnable control -- the user's call.
-
-### Still do not run `--gc --apply`
-
-Irreversible, and it would discard the snapshot the `...-verified-20260914` tag
-makes the rollback point for the migration. The four spatial stores will keep
-offering it; collecting them frees 0.00 GiB.
+**Decided 2026-09-16 by the user: leave it as is.** `--status` will keep offering
+`--gc` on the four spatial stores, and that is honest -- they hold unreachable
+snapshots from icechunk's fork-per-commit behaviour -- but collecting them frees
+**0.00 GiB**. It is also irreversible, and it would discard the snapshot the
+`...-verified-20260914` tag makes the rollback point for the migration. Do not
+read the offer as work outstanding.
 
 If the record is refreshed later, the cycle is:
 

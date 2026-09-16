@@ -661,3 +661,10 @@ That is a stronger statement than the verifier's own raw comparison can make on
 its own, and a cheaper one: it is a manifest walk, not a data read. It says the
 refactor changed metadata, only metadata, and exactly the metadata the guide
 asked for.
+
+The control stores were deleted on 2026-09-16 once this had been recorded, so
+the comparison is not re-runnable: reproducing it would mean checking out
+`f657071` or earlier and rebuilding the fixture with the pre-refactor code. That
+is the trade deliberately taken -- the result above is the evidence, and leaving
+3.8 GiB of stores whose names violate the naming convention sitting in the tree
+is its own kind of hazard.
