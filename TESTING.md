@@ -593,3 +593,71 @@ the store.
 by the `by mswep_zarr.py` marker. The revision worth recording is the one that
 produced the store, not the one checked out when somebody later asks after it.
 A rebuilt store has no history to preserve and gets a fresh one.
+
+## Tier 1 for the style guide refactor (2026-09-15, task 1.c)
+
+The eight stores were migrated onto the data engineering style guide in place
+(task 1.a) and the pipeline was then refactored to build into that state
+directly (task 1.b). This is the run that proves the refactored code actually
+builds a correct store, rather than merely agreeing with the migrated ones on
+paper.
+
+Four develop-queue jobs: build and verify the one-year fixture on both write
+paths. Jobs 7482200/01/02/04, then 7482277/78/79/80 after two fixes.
+
+### What the first run proved, and what it caught
+
+Both builds finished clean. The data checks passed on both paths:
+
+| | spatial (append) | temporal (region) |
+|---|---|---|
+| build | 365 steps, 4 batches | 9 blocks of 1.05 GiB |
+| cells bit-checked against raw | 148,522,500 across 23 boxes | 3,348,800 across 24 boxes |
+| chunks | 364 written, 1 absent | 16,151 written |
+| the absent chunk(s) | traced to 1979-07-01, which the fixture removes on purpose | the 49 Arctic-corner tiles, as in production |
+
+Both verifiers then failed on exactly two checks, neither of them about data.
+
+### 19. A fixture that cannot go green is a fixture nobody reads
+
+The tiny configs carried a `title`, `Conventions` and a `comment`, described in
+the config as 'a minimal attrs section'. The verifier requires nine more. So the
+fixture had failed the required-attributes check on **every run it was ever put
+through** -- five occurrences in `logs/verify_mswep_zarr_tiny_spatial.log`,
+going back to 2026-09-14, long before the style guide work.
+
+Calling it minimal made it sound deliberate, and a permanently red check is one
+nobody looks at: the two real failures in this run were sitting in the same
+output as a failure everyone had learned to ignore. Both fixtures now carry the
+full attribute set.
+
+### 20. A layout check has to know what the fixture is for
+
+The new check compared the store's parent directory to the layout its chunking
+implies, which is right for a production store in `spatial/` and wrong for the
+fixture, which sits in `tiny_spatial/` precisely so that a mistyped path cannot
+resolve to a production store.
+
+Split in two: the directory must be the one the config names, and it must
+*contain* the layout token. `spatial` and `temporal` are not substrings of one
+another, so a temporal store filed under a spatial directory still fails.
+
+### 21. The pre-refactor fixtures are the control, and they are worth keeping
+
+The tiny stores built before the refactor were deliberately **not** migrated.
+Rebuilding them from raw is the test; migrating them first would have destroyed
+the evidence. Comparing the two, from the same staged year:
+
+```
+shape / chunk_shape / dtype / chunk occupancy   same  (364 and 16,151 exactly)
+root attrs   + cf_compliance dtype_note nomenclature
+               temporal_frequency original_temporal_frequency
+             - nothing    ~ nothing
+var attrs    + original_units original_variable_name unit_conversion
+             - nothing    ~ long_name units
+```
+
+That is a stronger statement than the verifier's own raw comparison can make on
+its own, and a cheaper one: it is a manifest walk, not a data read. It says the
+refactor changed metadata, only metadata, and exactly the metadata the guide
+asked for.
