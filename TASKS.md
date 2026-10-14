@@ -23,8 +23,14 @@ here predate them:
   proleptic_gregorian, in the coarsest unit that represents the source times
   exactly". `days since 1900-01-01` is compliant for daily data, so this needs
   no change; it is listed so nobody re-derives it.
-- **`standard_name` policy:** pending the user's decision (2026-10-14); append
-  here once settled.
+- **`standard_name` policy (decided 2026-10-14): the lake sets no
+  `standard_name`;** any source one is kept as `original_standard_name`.
+  `standard_name: precipitation_flux` was added by the config
+  (`variable_attrs`), not taken from the source files, which carry none.
+  Remove it from the configs and from all eight stores. `finalize --attrs`
+  cannot drop a variable attribute (root group only, merge semantics); this
+  needs a small temporary script, proven by the chunk-manifest comparison
+  (CLAUDE.md, "Migrating a built store").
 
 
 General notes:
