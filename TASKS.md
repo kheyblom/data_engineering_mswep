@@ -10,6 +10,23 @@ b. ~~Update the codebase so that the original pipeline so that if it were ran fr
 c. ~~Test the codebase refactor.~~ **COMPLETED 2026-09-15** -- Tier 1 fixture built and verified on both write paths from raw: spatial 60 checks / 0 failures (148.5M cells bit-checked), temporal 64 checks / 0 failures. Against the pre-refactor fixtures the shape, chunking, dtype and chunk occupancy are identical, so the refactor changed metadata only. See TESTING.md findings 19-21.
 
 
+# 2. Align stores with the 2026-10-14 style guide updates -- DEFERRED (user: clean up at a later date)
+
+The style guide gained general rules while the Level 2 section was written for
+data_engineering_wiso-sat (style_guides commit after 7bc9f72). The stores
+here predate them:
+- **`cdm_data_type: Grid`** is now a required global attribute (ACDD-1.3).
+  Add it to the config `attrs` so new builds carry it, and to the existing
+  eight stores with a metadata-only `finalize_mswep_zarr.py --attrs` pass. No
+  data is rewritten; re-run the verifier's `structure` phase afterwards.
+- **`time` encoding:** the rule is now "int64 since 1900-01-01,
+  proleptic_gregorian, in the coarsest unit that represents the source times
+  exactly". `days since 1900-01-01` is compliant for daily data, so this needs
+  no change; it is listed so nobody re-derives it.
+- **`standard_name` policy:** pending the user's decision (2026-10-14); append
+  here once settled.
+
+
 General notes:
 - initalize a github repo and connect to remote: https://github.com/kheyblom/data_engineering_mswep.git if this is not already done. make sure to use proper version controlling as changes are made.
 - build a CLAUDE.md that will take this information and effectively and efficiently handle this project. Use information learned in: @/glade/u/home/kheyblom/work/data_engineering/data_engineering_gleam and add to this project's CLAUDE.md.
