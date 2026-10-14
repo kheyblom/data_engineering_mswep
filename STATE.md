@@ -16,7 +16,7 @@ The original eight tasks are complete: 396 checks across the eight stores, **0
 failures**, ~630 million cells compared bit-exactly against the raw netCDF
 files. A new task list, [TASKS.md](TASKS.md) Task 1, aligns the project with the
 data engineering style guide
-(`/glade/u/home/kheyblom/work/style_guides/style-guide_data_engineering.md`).
+(`/glade/u/home/kheyblom/work/style_guides/style-guide_data-engineering_raw-to-datalake.md`).
 
 **Task 1.a is done.** All eight stores were migrated in place on 2026-09-15 --
 metadata only, no data read, written or moved, no core-hours spent. They now

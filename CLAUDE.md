@@ -44,7 +44,7 @@ The task list the project is working through is [TASKS.md](TASKS.md).
 ## Nomenclature, units and store naming
 
 Governed by
-[style-guide_data_engineering.md](/glade/u/home/kheyblom/work/style_guides/style-guide_data_engineering.md)
+[style-guide_data-engineering_raw-to-datalake.md](/glade/u/home/kheyblom/work/style_guides/style-guide_data-engineering_raw-to-datalake.md)
 and the authoritative
 [nomenclature_data.md](/glade/u/home/kheyblom/work/style_guides/nomenclature_data.md).
 The project's own mapping onto them is `nomenclature-key_mswep.md` at the repo
